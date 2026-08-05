@@ -11,11 +11,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
 import { ProviderLogo } from "@/components/ProviderLogo";
+import { localizedError, useI18n } from "@/lib/i18n";
 
-const ROLE_STYLE: Record<string, { label: string; variant: "success" | "default" | "outline"; icon: React.ElementType | null }> = {
-  primary: { label: "Principal", variant: "success", icon: Zap },
-  fallback: { label: "Fallback", variant: "default", icon: ArrowDownToLine },
-  none: { label: "Sem função", variant: "outline", icon: null }
+const ROLE_STYLE: Record<string, { key: "provider.primary" | "provider.fallback" | "provider.none"; variant: "success" | "default" | "outline"; icon: React.ElementType | null }> = {
+  primary: { key: "provider.primary", variant: "success", icon: Zap },
+  fallback: { key: "provider.fallback", variant: "default", icon: ArrowDownToLine },
+  none: { key: "provider.none", variant: "outline", icon: null }
 };
 
 /**
@@ -35,6 +36,7 @@ export function ProviderCards({
   compact?: boolean;
 }) {
   const toast = useToast();
+  const { t, locale } = useI18n();
   const [editing, setEditing] = React.useState<ModelProvider | null>(null);
   const [busy, setBusy] = React.useState<string | null>(null);
 
@@ -46,7 +48,7 @@ export function ProviderCards({
       const result = await api.updateProvider(provider.id, { role });
       onChange(result.items);
     } catch (error) {
-      toast({ title: "Não foi possível mudar o papel", description: (error as Error).message, variant: "error" });
+      toast({ title: t("provider.roleError"), description: localizedError(error, t, locale), variant: "error" });
     } finally {
       setBusy(null);
     }
@@ -80,27 +82,26 @@ export function ProviderCards({
                 {provider.configured ? (
                   <Badge variant={role.variant} className="gap-1">
                     {RoleIcon ? <RoleIcon className="size-3" /> : null}
-                    {role.label}
+                    {t(role.key)}
                   </Badge>
                 ) : null}
               </div>
 
               {provider.configured ? (
                 <p className="text-xs text-muted-foreground">
-                  {provider.active_key_count} chave{provider.active_key_count === 1 ? "" : "s"} ativa
-                  {provider.active_key_count === 1 ? "" : "s"}
-                  {provider.supports_multiple_keys && provider.active_key_count > 1 ? " · rodízio" : ""}
+                  {t("provider.activeKeys", { count: provider.active_key_count })}
+                  {provider.supports_multiple_keys && provider.active_key_count > 1 ? t("provider.rotation") : ""}
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">
-                  Ainda sem chave.{" "}
+                  {t("provider.noKey")}{" "}
                   <a
                     href={provider.docs_url}
                     target="_blank"
                     rel="noreferrer noopener"
                     className="text-primary underline underline-offset-2"
                   >
-                    Obter uma
+                    {t("provider.getKey")}
                     <ExternalLink className="ml-0.5 inline size-3" />
                   </a>
                 </p>
@@ -109,20 +110,20 @@ export function ProviderCards({
               <div className="mt-auto flex flex-wrap gap-1.5">
                 <Button size="sm" variant={provider.configured ? "outline" : "default"} onClick={() => setEditing(provider)}>
                   {provider.configured ? <Plus /> : <KeyRound />}
-                  {provider.configured ? "Adicionar chave" : "Configurar"}
+                  {provider.configured ? t("provider.addKey") : t("provider.configure")}
                 </Button>
 
                 {provider.configured && provider.role !== "primary" ? (
                   <Button size="sm" variant="ghost" disabled={busy === provider.id} onClick={() => setRole(provider, "primary")}>
                     {busy === provider.id ? <Loader2 className="animate-spin" /> : <Zap />}
-                    Tornar principal
+                    {t("provider.makePrimary")}
                   </Button>
                 ) : null}
 
                 {provider.configured && provider.role === "none" && configuredCount > 2 ? (
                   <Button size="sm" variant="ghost" disabled={busy === provider.id} onClick={() => setRole(provider, "fallback")}>
                     <ArrowDownToLine />
-                    Usar como fallback
+                    {t("provider.useFallback")}
                   </Button>
                 ) : null}
               </div>
@@ -153,6 +154,7 @@ function ProviderDialog({
   onSaved: (items: ModelProvider[]) => void;
 }) {
   const toast = useToast();
+  const { t, locale } = useI18n();
   const [secret, setSecret] = React.useState("");
   const [label, setLabel] = React.useState("");
   const [model, setModel] = React.useState("");
@@ -185,10 +187,10 @@ function ProviderDialog({
         model: effectiveModel,
         make_primary: makePrimary
       });
-      toast({ title: `${provider!.label} configurado`, variant: "success" });
+      toast({ title: t("provider.configured", { provider: provider!.label }), variant: "success" });
       onSaved(result.providers ?? []);
     } catch (error) {
-      toast({ title: "Não foi possível salvar", description: (error as Error).message, variant: "error" });
+      toast({ title: t("provider.saveError"), description: localizedError(error, t, locale), variant: "error" });
     } finally {
       setSaving(false);
     }
@@ -203,9 +205,9 @@ function ProviderDialog({
             {provider.label}
           </DialogTitle>
           <DialogDescription>
-            A chave fica no banco local com permissão 600 e nunca é devolvida para a interface.{" "}
+            {t("provider.secretDescription")}{" "}
             <a href={provider.docs_url} target="_blank" rel="noreferrer noopener" className="text-primary underline underline-offset-2">
-              Onde consigo a chave
+              {t("provider.whereKey")}
               <ExternalLink className="ml-0.5 inline size-3" />
             </a>
           </DialogDescription>
@@ -213,7 +215,7 @@ function ProviderDialog({
 
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <Label htmlFor="provider-secret">Chave de API</Label>
+            <Label htmlFor="provider-secret">{t("provider.apiKey")}</Label>
             <Input
               id="provider-secret"
               type="password"
@@ -226,17 +228,17 @@ function ProviderDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="provider-label">Apelido</Label>
+            <Label htmlFor="provider-label">{t("provider.nickname")}</Label>
             <Input id="provider-label" value={label} onChange={(event) => setLabel(event.target.value)} />
             {provider.supports_multiple_keys ? (
               <p className="text-xs text-muted-foreground">
-                Este provider aceita várias chaves e as usa em rodízio para esticar a cota.
+                {t("provider.multipleKeys")}
               </p>
             ) : null}
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="provider-model">Modelo</Label>
+            <Label htmlFor="provider-model">{t("provider.model")}</Label>
             <Select value={model} onValueChange={setModel}>
               <SelectTrigger id="provider-model">
                 <SelectValue />
@@ -247,14 +249,14 @@ function ProviderDialog({
                     {option}
                   </SelectItem>
                 ))}
-                <SelectItem value="__custom__">Outro modelo…</SelectItem>
+                <SelectItem value="__custom__">{t("provider.otherModel")}</SelectItem>
               </SelectContent>
             </Select>
             {isCustom ? (
               <Input
                 value={customModel}
                 onChange={(event) => setCustomModel(event.target.value)}
-                placeholder="identificador exato do modelo"
+                placeholder={t("provider.modelPlaceholder")}
                 className="font-mono"
                 autoFocus
               />
@@ -263,19 +265,16 @@ function ProviderDialog({
 
           <div className="flex items-start justify-between gap-4 rounded-lg border border-border p-3">
             <div className="space-y-0.5">
-              <p className="text-sm font-medium">Usar como provider principal</p>
-              <p className="text-xs text-muted-foreground">
-                Todas as chamadas vão para ele. O provider que era principal vira fallback quando só há dois
-                configurados.
-              </p>
+              <p className="text-sm font-medium">{t("provider.useAsPrimary")}</p>
+              <p className="text-xs text-muted-foreground">{t("provider.primaryDescription")}</p>
             </div>
-            <Switch checked={makePrimary} onCheckedChange={setMakePrimary} aria-label="Usar como principal" />
+            <Switch checked={makePrimary} onCheckedChange={setMakePrimary} aria-label={t("provider.useAsPrimary")} />
           </div>
         </div>
 
         <Button onClick={save} disabled={saving || secret.trim().length < 8 || !effectiveModel}>
           {saving ? <Loader2 className="animate-spin" /> : <Check />}
-          Salvar
+          {t("common.save")}
         </Button>
       </DialogContent>
     </Dialog>

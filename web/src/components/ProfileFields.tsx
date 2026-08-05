@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { profileMetadata, useI18n } from "@/lib/i18n";
 
 type Profile = Record<string, any>;
 
@@ -37,6 +38,7 @@ export function ProfileSectionFields({
   onChange: (next: Profile) => void;
   highlight?: string[];
 }) {
+  const { locale } = useI18n();
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       {section.fields.map((field) => {
@@ -46,17 +48,18 @@ export function ProfileSectionFields({
         return (
           <div key={field.key} className={cn("space-y-1.5", isWide && "sm:col-span-2")}>
             <Label htmlFor={`${section.key}-${field.key}`} className="flex items-center gap-1.5">
-              {field.label}
+              {profileMetadata("field", field.key, field.label, locale)}
               {field.required ? <span className="text-destructive">*</span> : null}
             </Label>
             <FieldControl
               id={`${section.key}-${field.key}`}
               field={field}
+              sectionKey={section.key}
               value={value}
               highlighted={isHighlighted}
               onChange={(next) => onChange(writeValue(profile, section, field, next))}
             />
-            {field.hint ? <p className="text-xs text-muted-foreground">{field.hint}</p> : null}
+            {field.hint ? <p className="text-xs text-muted-foreground">{profileMetadata("hint", field.key, field.hint, locale)}</p> : null}
           </div>
         );
       })}
@@ -67,16 +70,19 @@ export function ProfileSectionFields({
 function FieldControl({
   id,
   field,
+  sectionKey,
   value,
   onChange,
   highlighted
 }: {
   id: string;
   field: ProfileField;
+  sectionKey: string;
   value: any;
   onChange: (value: ProfileValue) => void;
   highlighted?: boolean;
 }) {
+  const { t, locale } = useI18n();
   const ring = highlighted ? "border-primary/60 ring-1 ring-primary/30" : "";
 
   switch (field.type) {
@@ -98,13 +104,13 @@ function FieldControl({
       return (
         <Select value={value || "__empty__"} onValueChange={(next) => onChange(next === "__empty__" ? "" : next)}>
           <SelectTrigger id={id} className={ring}>
-            <SelectValue placeholder="Não informado" />
+            <SelectValue placeholder={t("profile.notDeclared")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="__empty__">Não informado</SelectItem>
+            <SelectItem value="__empty__">{t("profile.notDeclared")}</SelectItem>
             {(field.options || []).map((option) => (
               <SelectItem key={option} value={option}>
-                {option}
+                {profileMetadata("option", option, option, locale)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -117,7 +123,7 @@ function FieldControl({
           id={id}
           value={Array.isArray(value) ? value.join(", ") : ""}
           onChange={(event) => onChange(event.target.value.split(",").map((item) => item.trim()).filter(Boolean))}
-          placeholder="Separe por vírgulas"
+          placeholder={locale === "en" ? "Separate with commas" : "Separe por vírgulas"}
           className={ring}
         />
       );
@@ -129,18 +135,12 @@ function FieldControl({
       return <YearsMapControl value={value || {}} onChange={onChange} />;
 
     case "record_list":
-      return <RecordListControl field={field} value={Array.isArray(value) ? value : []} onChange={onChange} />;
+      return <RecordListControl sectionKey={sectionKey} field={field} value={Array.isArray(value) ? value : []} onChange={onChange} />;
 
     default:
       return <Input id={id} value={value ?? ""} onChange={(event) => onChange(event.target.value)} className={ring} />;
   }
 }
-
-const TRISTATE_OPTIONS = [
-  { value: null, label: "Não informar" },
-  { value: true, label: "Sim" },
-  { value: false, label: "Não" }
-] as const;
 
 /**
  * Three explicit states. "Não informar" is a real, selectable answer: it is what
@@ -157,9 +157,15 @@ function TristateControl({
   onChange: (value: boolean | null) => void;
   highlighted?: boolean;
 }) {
+  const { t } = useI18n();
+  const options = [
+    { value: null, label: t("profile.notDeclared") },
+    { value: true, label: t("common.yes") },
+    { value: false, label: t("common.no") }
+  ] as const;
   return (
     <div id={id} role="radiogroup" className={cn("inline-flex rounded-md border border-input p-0.5", highlighted && "border-primary/60")}>
-      {TRISTATE_OPTIONS.map((option) => {
+      {options.map((option) => {
         const active = value === option.value;
         return (
           <button
@@ -198,6 +204,7 @@ function EnumOrTextControl({
   onChange: (value: ProfileValue) => void;
   highlighted?: boolean;
 }) {
+  const { t, locale } = useI18n();
   const options = field.options || [];
   const isOther = Boolean(value) && !options.includes(value);
   const [showText, setShowText] = React.useState(isOther);
@@ -222,16 +229,16 @@ function EnumOrTextControl({
         }}
       >
         <SelectTrigger id={id} className={highlighted ? "border-primary/60 ring-1 ring-primary/30" : undefined}>
-          <SelectValue placeholder="Não informar" />
+          <SelectValue placeholder={t("profile.notDeclared")} />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="__empty__">Não informar</SelectItem>
+          <SelectItem value="__empty__">{t("profile.notDeclared")}</SelectItem>
           {options.map((option) => (
             <SelectItem key={option} value={option}>
-              {option}
+              {profileMetadata("option", option, option, locale)}
             </SelectItem>
           ))}
-          <SelectItem value="__other__">Outro…</SelectItem>
+          <SelectItem value="__other__">{locale === "en" ? "Other…" : "Outro…"}</SelectItem>
         </SelectContent>
       </Select>
 
@@ -239,7 +246,7 @@ function EnumOrTextControl({
         <Input
           value={isOther ? value : ""}
           onChange={(event) => onChange(event.target.value)}
-          placeholder="Descreva"
+          placeholder={locale === "en" ? "Describe" : "Descreva"}
           autoFocus
         />
       ) : null}
@@ -248,6 +255,7 @@ function EnumOrTextControl({
 }
 
 function YearsMapControl({ value, onChange }: { value: Record<string, number>; onChange: (value: ProfileValue) => void }) {
+  const { t, locale } = useI18n();
   const entries = Object.entries(value);
   const [draftKey, setDraftKey] = React.useState("");
   const [draftYears, setDraftYears] = React.useState("");
@@ -277,7 +285,7 @@ function YearsMapControl({ value, onChange }: { value: Record<string, number>; o
                   onChange(next);
                 }}
                 className="text-muted-foreground transition-colors hover:text-destructive"
-                aria-label={`Remover ${technology}`}
+                aria-label={`${t("common.remove")} ${technology}`}
               >
                 <Trash2 className="size-3" />
               </button>
@@ -290,7 +298,7 @@ function YearsMapControl({ value, onChange }: { value: Record<string, number>; o
         <Input
           value={draftKey}
           onChange={(event) => setDraftKey(event.target.value)}
-          placeholder="Tecnologia"
+          placeholder={locale === "en" ? "Technology" : "Tecnologia"}
           className="max-w-52"
           onKeyDown={(event) => event.key === "Enter" && (event.preventDefault(), add())}
         />
@@ -300,13 +308,13 @@ function YearsMapControl({ value, onChange }: { value: Record<string, number>; o
           max={60}
           value={draftYears}
           onChange={(event) => setDraftYears(event.target.value)}
-          placeholder="Anos"
+          placeholder={locale === "en" ? "Years" : "Anos"}
           className="max-w-24"
           onKeyDown={(event) => event.key === "Enter" && (event.preventDefault(), add())}
         />
         <Button type="button" variant="outline" size="sm" onClick={add} disabled={!draftKey.trim() || draftYears === ""}>
           <Plus />
-          Adicionar
+          {t("common.add")}
         </Button>
       </div>
     </div>
@@ -314,14 +322,17 @@ function YearsMapControl({ value, onChange }: { value: Record<string, number>; o
 }
 
 function RecordListControl({
+  sectionKey,
   field,
   value,
   onChange
 }: {
+  sectionKey: string;
   field: ProfileField;
   value: Record<string, any>[];
   onChange: (value: ProfileValue) => void;
 }) {
+  const { t, locale } = useI18n();
   const itemFields = field.item_fields || [];
 
   const updateItem = (index: number, key: string, next: ProfileValue) => {
@@ -341,7 +352,7 @@ function RecordListControl({
               size="icon"
               onClick={() => onChange(value.filter((_, position) => position !== index))}
               className="text-muted-foreground hover:text-destructive"
-              aria-label={`Remover item ${index + 1}`}
+              aria-label={`${t("common.remove")} item ${index + 1}`}
             >
               <Trash2 />
             </Button>
@@ -349,14 +360,14 @@ function RecordListControl({
           <div className="grid gap-3 sm:grid-cols-2">
             {itemFields.map((subField) => (
               <div key={subField.key} className="space-y-1.5">
-                <Label className="text-xs">{subField.label}</Label>
+                <Label className="text-xs">{profileMetadata("subfield", subField.key, subField.label, locale, sectionKey)}</Label>
                 {subField.type === "string_list" ? (
                   <Input
                     value={Array.isArray(item[subField.key]) ? item[subField.key].join(", ") : ""}
                     onChange={(event) =>
                       updateItem(index, subField.key, event.target.value.split(",").map((v) => v.trim()).filter(Boolean))
                     }
-                    placeholder="Separe por vírgulas"
+                    placeholder={locale === "en" ? "Separate with commas" : "Separe por vírgulas"}
                   />
                 ) : (
                   <Input
@@ -377,7 +388,7 @@ function RecordListControl({
         onClick={() => onChange([...value, Object.fromEntries(itemFields.map((sub) => [sub.key, sub.type === "string_list" ? [] : ""]))])}
       >
         <Plus />
-        Adicionar
+        {t("common.add")}
       </Button>
     </div>
   );

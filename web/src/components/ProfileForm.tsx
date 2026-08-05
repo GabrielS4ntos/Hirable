@@ -13,7 +13,7 @@ import { useToast } from "@/components/ui/toast";
 import { ProfileSectionFields } from "@/components/ProfileFields";
 import { ResumeUploads } from "@/components/ResumeUploads";
 import { ProviderCards } from "@/components/ProviderCards";
-import { localizedError, useI18n, type Translate } from "@/lib/i18n";
+import { localizedError, profileMetadata, useI18n, type Translate } from "@/lib/i18n";
 
 const MIN_RESUME_CHARS = 40;
 
@@ -148,11 +148,8 @@ export function ProfileForm({ mode }: { mode: "onboarding" | "profile" }) {
 
       <Card className={!providers.some((provider) => provider.configured) ? "border-primary/40" : undefined}>
         <CardHeader>
-          <CardTitle>Provider de modelo</CardTitle>
-          <CardDescription>
-            Onde os agentes rodam. O primeiro que você configurar vira o principal; o segundo vira o fallback
-            automático quando o principal estoura a cota.
-          </CardDescription>
+          <CardTitle>{t("profile.providerTitle")}</CardTitle>
+          <CardDescription>{t("profile.providerDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <ProviderCards providers={providers} onChange={setProviders} compact />
@@ -193,7 +190,7 @@ export function ProfileForm({ mode }: { mode: "onboarding" | "profile" }) {
             </Button>
             {!hasProvider ? (
               <p className="text-xs text-muted-foreground">
-                Preencher precisa de um provider de modelo. Configure um abaixo para liberar o botão.
+                {t("profile.providerRequired")}
               </p>
             ) : null}
           </div>
@@ -231,9 +228,9 @@ export function ProfileForm({ mode }: { mode: "onboarding" | "profile" }) {
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               {section.sensitive ? <ShieldCheck className="size-4 text-primary" /> : null}
-              {section.label}
+              {profileMetadata("section", section.key, section.label, locale, "label")}
             </CardTitle>
-            {section.description ? <CardDescription>{section.description}</CardDescription> : null}
+            {section.description ? <CardDescription>{profileMetadata("section", section.key, section.description, locale, "description")}</CardDescription> : null}
           </CardHeader>
           <CardContent>
             <ProfileSectionFields section={section} profile={profile} onChange={setProfile} highlight={filledFields} />

@@ -14,9 +14,28 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
+import { localizedError, useI18n } from "@/lib/i18n";
 
 export function KeysPage({ refreshStatus }: PageProps) {
   const toast = useToast();
+  const { t, locale } = useI18n();
+  const c = locale === "en" ? {
+    providers: "Model providers", providersHelp: "The primary receives all calls; the fallback takes over on quota failures. With two configured providers, choosing the primary automatically defines the other as fallback.",
+    newKey: "New key", newKeyHelp: "Keys are stored in local SQLite (file permission 600) and take priority over environment secrets. Gemini keys use round-robin; OpenRouter is the fallback when all Gemini keys hit quota limits.",
+    provider: "Provider", nickname: "Nickname", nicknamePlaceholder: "personal account", key: "Key", add: "Add",
+    saved: "Key saved", savedHelp: "Pipelines will use this key on their next run.", saveError: "Could not save key",
+    active: "active", primary: "primary", fallback: "fallback", disabled: "Key disabled", enabled: "Key enabled", removed: "Key removed",
+    empty: "No keys registered. The agent falls back to environment variables in", uses: "Uses", lastUse: "Last use", activeHeading: "Active",
+    error: "error", enableKey: "Enable key", removeKey: "Remove key"
+  } : {
+    providers: "Providers de modelo", providersHelp: "O principal recebe todas as chamadas; o fallback assume quando ele falha por cota. Com dois providers configurados, escolher o principal define o outro como fallback automaticamente.",
+    newKey: "Nova chave", newKeyHelp: "As chaves ficam no SQLite local (arquivo com permissão 600) e têm prioridade sobre os segredos do ambiente. Chaves Gemini usam rodízio; a OpenRouter é o fallback quando todas as Gemini atingem a cota.",
+    provider: "Provedor", nickname: "Apelido", nicknamePlaceholder: "conta pessoal", key: "Chave", add: "Adicionar",
+    saved: "Chave salva", savedHelp: "Os pipelines já usam esta chave na próxima execução.", saveError: "Erro ao salvar chave",
+    active: "ativa(s)", primary: "principal", fallback: "fallback", disabled: "Chave desativada", enabled: "Chave ativada", removed: "Chave removida",
+    empty: "Nenhuma chave cadastrada. O agente usa as variáveis de ambiente em", uses: "Usos", lastUse: "Último uso", activeHeading: "Ativa",
+    error: "erro", enableKey: "Ativar chave", removeKey: "Remover chave"
+  };
   const keys = usePolling(api.listKeys, 0);
   const [provider, setProvider] = React.useState<string>("gemini");
   const [label, setLabel] = React.useState("");
@@ -39,9 +58,9 @@ export function KeysPage({ refreshStatus }: PageProps) {
       setLabel("");
       setSecret("");
       refreshStatus();
-      toast({ title: "Chave salva", description: "Os pipelines já usam esta chave na próxima execução.", variant: "success" });
+      toast({ title: c.saved, description: c.savedHelp, variant: "success" });
     } catch (error) {
-      toast({ title: "Erro ao salvar chave", description: (error as Error).message, variant: "error" });
+      toast({ title: c.saveError, description: localizedError(error, t, locale), variant: "error" });
     } finally {
       setSaving(false);
     }
@@ -53,7 +72,7 @@ export function KeysPage({ refreshStatus }: PageProps) {
       refreshStatus();
       toast({ title: message, variant: "success" });
     } catch (error) {
-      toast({ title: "Erro", description: (error as Error).message, variant: "error" });
+      toast({ title: t("common.error"), description: localizedError(error, t, locale), variant: "error" });
     }
   }
 
@@ -61,11 +80,8 @@ export function KeysPage({ refreshStatus }: PageProps) {
     <div className="space-y-6">
       <Card>
         <CardHeader>
-          <CardTitle>Providers de modelo</CardTitle>
-          <CardDescription>
-            O principal recebe todas as chamadas; o fallback assume quando ele falha por cota. Com dois providers
-            configurados, escolher o principal define o outro como fallback automaticamente.
-          </CardDescription>
+          <CardTitle>{c.providers}</CardTitle>
+          <CardDescription>{c.providersHelp}</CardDescription>
         </CardHeader>
         <CardContent>
           <ProviderCards providers={providers} onChange={setProviders} />
@@ -76,18 +92,16 @@ export function KeysPage({ refreshStatus }: PageProps) {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Plus className="size-4" />
-            Nova chave
+            {c.newKey}
           </CardTitle>
           <CardDescription>
-            As chaves ficam no SQLite local (arquivo com permissão 600) e têm prioridade sobre{" "}
-            <code className="font-mono text-xs">secrets/.env</code>. Chaves Gemini são usadas em round-robin; a
-            OpenRouter é o fallback quando todas as Gemini falham por cota.
+            {c.newKeyHelp} <code className="font-mono text-xs">secrets/.env</code>.
           </CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={addKey} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-[10rem_1fr_2fr_auto]">
             <div className="space-y-1.5">
-              <Label>Provedor</Label>
+              <Label>{c.provider}</Label>
               <Select value={provider} onValueChange={(value) => setProvider(value)}>
                 <SelectTrigger>
                   <SelectValue />
@@ -103,17 +117,17 @@ export function KeysPage({ refreshStatus }: PageProps) {
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="key-label">Apelido</Label>
+              <Label htmlFor="key-label">{c.nickname}</Label>
               <Input
                 id="key-label"
                 value={label}
                 onChange={(event) => setLabel(event.target.value)}
-                placeholder="conta pessoal"
+                placeholder={c.nicknamePlaceholder}
               />
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="key-secret">Chave</Label>
+              <Label htmlFor="key-secret">{c.key}</Label>
               <Input
                 id="key-secret"
                 type="password"
@@ -130,7 +144,7 @@ export function KeysPage({ refreshStatus }: PageProps) {
             <div className="flex items-end">
               <Button type="submit" disabled={saving || secret.length < 8} className="w-full sm:w-auto">
                 {saving ? <Loader2 className="animate-spin" /> : <Plus />}
-                Adicionar
+                {c.add}
               </Button>
             </div>
           </form>
@@ -141,12 +155,14 @@ export function KeysPage({ refreshStatus }: PageProps) {
         <KeyTable
           key={provider.id}
           title={provider.label}
-          description={`${items.filter((item) => item.provider === provider.id && item.enabled).length} ativa(s)${
-            provider.role === "primary" ? " · principal" : provider.role === "fallback" ? " · fallback" : ""
+          description={`${items.filter((item) => item.provider === provider.id && item.enabled).length} ${c.active}${
+            provider.role === "primary" ? ` · ${c.primary}` : provider.role === "fallback" ? ` · ${c.fallback}` : ""
           }`}
           items={items.filter((item) => item.provider === provider.id)}
-          onToggle={(item) => mutate(api.updateKey(item.id, { enabled: !item.enabled }), item.enabled ? "Chave desativada" : "Chave ativada")}
-          onDelete={(item) => mutate(api.deleteKey(item.id), "Chave removida")}
+          onToggle={(item) => mutate(api.updateKey(item.id, { enabled: !item.enabled }), item.enabled ? c.disabled : c.enabled)}
+          onDelete={(item) => mutate(api.deleteKey(item.id), c.removed)}
+          copy={c}
+          locale={locale}
         />
       ))}
     </div>
@@ -158,13 +174,17 @@ function KeyTable({
   description,
   items,
   onToggle,
-  onDelete
+  onDelete,
+  copy,
+  locale
 }: {
   title: string;
   description: string;
   items: ApiKey[];
   onToggle: (item: ApiKey) => void;
   onDelete: (item: ApiKey) => void;
+  copy: { empty: string; nickname: string; key: string; uses: string; lastUse: string; activeHeading: string; error: string; enableKey: string; removeKey: string };
+  locale: "pt-BR" | "en";
 }) {
   return (
     <Card>
@@ -178,18 +198,18 @@ function KeyTable({
       <CardContent>
         {items.length === 0 ? (
           <p className="py-6 text-center text-sm text-muted-foreground">
-            Nenhuma chave cadastrada. O agente cai para as variáveis de ambiente em{" "}
+            {copy.empty}{" "}
             <code className="font-mono text-xs">secrets/.env</code>.
           </p>
         ) : (
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Apelido</TableHead>
-                <TableHead>Chave</TableHead>
-                <TableHead className="w-24">Usos</TableHead>
-                <TableHead className="w-32">Último uso</TableHead>
-                <TableHead className="w-24">Ativa</TableHead>
+                <TableHead>{copy.nickname}</TableHead>
+                <TableHead>{copy.key}</TableHead>
+                <TableHead className="w-24">{copy.uses}</TableHead>
+                <TableHead className="w-32">{copy.lastUse}</TableHead>
+                <TableHead className="w-24">{copy.activeHeading}</TableHead>
                 <TableHead className="w-12" />
               </TableRow>
             </TableHeader>
@@ -200,7 +220,7 @@ function KeyTable({
                     {item.label}
                     {item.last_error ? (
                       <Badge variant="destructive" className="ml-2">
-                        erro
+                        {copy.error}
                       </Badge>
                     ) : null}
                     {item.last_error ? (
@@ -209,12 +229,12 @@ function KeyTable({
                   </TableCell>
                   <TableCell className="font-mono text-xs text-muted-foreground">{item.masked}</TableCell>
                   <TableCell className="font-mono tabular-nums">{item.use_count}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">{formatDateTime(item.last_used_at)}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">{formatDateTime(item.last_used_at, locale)}</TableCell>
                   <TableCell>
                     <Switch
                       checked={item.enabled}
                       onCheckedChange={() => onToggle(item)}
-                      aria-label={`Ativar chave ${item.label}`}
+                      aria-label={`${copy.enableKey} ${item.label}`}
                     />
                   </TableCell>
                   <TableCell>
@@ -223,7 +243,7 @@ function KeyTable({
                       size="icon"
                       onClick={() => onDelete(item)}
                       className="text-muted-foreground hover:text-destructive"
-                      aria-label={`Remover chave ${item.label}`}
+                      aria-label={`${copy.removeKey} ${item.label}`}
                     >
                       <Trash2 />
                     </Button>
