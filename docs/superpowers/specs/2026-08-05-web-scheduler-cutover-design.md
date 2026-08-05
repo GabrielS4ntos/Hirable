@@ -39,7 +39,9 @@ All schedules use timezone `America/Sao_Paulo`, weekdays Monday through Saturday
 - Times: the same explicit sequence shifted five minutes, from 08:05 through 21:35
 - Jitter: 30 seconds
 
-Explicit daily times preserve the five-minute phase after first boot, restart, downtime, and macOS suspension. They avoid the current scheduler behavior that recomputes interval markers from `last_run_at` during boot. Each list has 31 entries; no invitation run is scheduled without a corresponding DM run. The CLI's own work-window checks remain a second safety boundary.
+Explicit daily times define the five-minute phase. A small pair-aware scheduler rule preserves it after first boot, restart, downtime, and macOS suspension: network and DM are refreshed as one pair, never independently. The refresh selects the next future network slot and sets DM to that slot plus five minutes. If startup happens between a network slot and its DM slot, that orphan DM is skipped and the next complete pair is selected. Each list has 31 entries; no invitation run is scheduled without a corresponding DM run. The CLI's own work-window checks remain a second safety boundary.
+
+`Scheduler.refreshAllNextRuns()` will call a dedicated inbox-pair refresh and skip individual refresh for `network` and `dm`. The same pair-aware rule applies when either schedule is edited and when the service resumes after downtime. Tests cover initial boot, restart before a pair, restart between the two members, and resumption after suspension.
 
 ### Jobs
 
@@ -73,8 +75,8 @@ The database, WAL, and shared-memory files are already mode `0600`; permissions 
 5. In one SQLite transaction, copy supported API keys and replace all three schedule definitions, but keep every schedule in `manual` mode with null runtime markers. Roll back the whole transaction on any error.
 6. Render and install the machine-specific web-console plist in `~/Library/LaunchAgents`, then load it.
 7. Verify the new service, port, scheduler health, desired schedule definitions, key counts, file permissions, and unchanged `pipeline_runs` count while every pipeline remains manual.
-8. In a final short transaction, change the three modes to `auto` and keep `next_run_at` null. On the next tick the healthy scheduler computes the next strictly future member of each explicit daily-time list; it cannot enqueue the current or a past slot.
-9. Wait through the first scheduler tick and verify future markers, five-minute phase, and unchanged `pipeline_runs` count. Mark the recovery file complete but preserve it for rollback audit.
+8. In a final short transaction, change the three modes to `auto`. Compute and persist the next complete inbox pair explicitly: the next future network slot and its DM slot five minutes later. Set the jobs marker to its next strictly future daily time.
+9. Wait through the first scheduler tick and verify the persisted complete pair, five-minute phase, future jobs marker, and unchanged `pipeline_runs` count. Mark the recovery file complete but preserve it for rollback audit.
 
 The database remains in manual mode until the persistent web service is healthy, so no scheduler can observe partially migrated automatic schedules. The old agents are unloaded, disabled, and moved before the final short activation transaction. If the new service fails any critical verification, it is unloaded, its installed plist is moved out of `~/Library/LaunchAgents`, the complete schedule snapshot is restored, inserted key IDs are removed, and the old plists are restored, re-enabled, reloaded, and revalidated. The durable phase file makes each recovery step idempotent after interruption or process death.
 
@@ -100,5 +102,6 @@ The database remains in manual mode until the persistent web service is healthy,
 - No pipeline run is added to `pipeline_runs` during cutover.
 - On rollback, the old LaunchAgents are loaded again and their previous operational state is verified.
 - The old installed plists are absent from `~/Library/LaunchAgents` during normal web-scheduler operation, and the new installed plist is absent after rollback.
-- A mode-`manual` health check occurs before activation, and the first automatic tick only computes strictly future markers.
+- A mode-`manual` health check occurs before activation, and activation persists one strictly future complete network/DM pair plus a strictly future jobs marker.
+- Pair-aware scheduler tests prove that boot/restart/suspension never produce an orphan DM marker or erase the five-minute phase.
 - The durable `0600` recovery file records a completed phase and is sufficient for idempotent rollback after interruption.
