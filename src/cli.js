@@ -31,6 +31,7 @@ import { DEFAULT_DEDUPE_MINUTES } from "./alert-dedupe.js";
 import { RESUME_GATE_CODE, evaluateResumeGate } from "./resume-gate.js";
 import { canUploadResume } from "./resume-upload.js";
 import { LINKEDIN_GATE_CODE, evaluateLinkedInGate } from "./linkedin-gate.js";
+import { explainSalaryRefusal, isSalaryLabel, resolveSalaryAnswer } from "./salary-answer.js";
 import { detectSession, sessionRecord } from "./linkedin-session.js";
 import { ensureResumeSelected } from "./resume-selection.js";
 import { renderAlertEmail } from "./email-template.js";
@@ -39,7 +40,6 @@ import {
   PROFILE_SECTIONS,
   buildProfileResponseSchema,
   declaredDemographics,
-  mergeProfiles,
   normalizeProfile,
   profileFactsForModel
 } from "./profile-schema.js";
@@ -48,9 +48,7 @@ const execFileAsync = promisify(execFile);
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), "..");
-const CONFIG_PATH = path.join(ROOT, "config.json");
 const LOG_DIR = path.join(ROOT, "logs");
-const ENV_PATH = path.join(ROOT, "secrets", ".env");
 
 let semanticMemoryInstance = null;
 let appStoreInstance = null;
@@ -77,30 +75,6 @@ function stableJson(value) {
   return JSON.stringify(value);
 }
 
-async function readJson(filePath) {
-  return JSON.parse(await fs.readFile(filePath, "utf8"));
-}
-
-async function loadLocalEnv() {
-  const raw = await fs.readFile(ENV_PATH, "utf8").catch(() => "");
-  for (const line of raw.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#") || !trimmed.includes("=")) continue;
-    const index = trimmed.indexOf("=");
-    const key = trimmed.slice(0, index).trim();
-    let value = trimmed.slice(index + 1).trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    if (key && process.env[key] === undefined) process.env[key] = value;
-  }
-}
-
-async function writeJson(filePath, value) {
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  await fs.writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`);
-}
-
 function localDatabasePath(config) {
   const configured = config.storage?.database_path || config.jobs_watcher?.semantic_memory?.database_path;
   if (!configured) throw new Error("storage.database_path is required");
@@ -121,8 +95,8 @@ function openAppStore(config = null) {
 }
 
 /**
- * Effective configuration: code defaults, the optional legacy `config.json`, the
- * user's overrides stored in SQLite and finally the environment.
+ * Effective configuration: code defaults, the user's overrides stored in SQLite
+ * and finally the environment.
  *
  * Cached per process — a pipeline run resolves it dozens of times.
  */
@@ -159,13 +133,9 @@ async function readAppState(providedConfig = null) {
   const stored = store.readRuntimeState();
   if (stored) return stored;
 
-  const legacyPath = path.resolve(ROOT, config.storage?.legacy_state_path || "./state.json");
-  const legacy = await readJson(legacyPath).catch(() => ({ version: 1, dm: { threads: {} } }));
-  store.writeRuntimeState(legacy);
-  store.setMetadata("legacy_state_imported_at", nowIso());
-  store.setMetadata("legacy_state_sha256", sha256(stableJson(legacy)));
-  store.setMetadata("legacy_state_path", path.relative(ROOT, legacyPath));
-  return legacy;
+  const initial = { version: 1, dm: { threads: {} } };
+  store.writeRuntimeState(initial);
+  return initial;
 }
 
 async function writeAppState(state, providedConfig = null) {
@@ -176,27 +146,23 @@ async function writeAppState(state, providedConfig = null) {
 /**
  * Trusted profile used by every agent.
  *
- * The onboarding profile stored in SQLite is the authoritative source and is
- * merged over the legacy `profile.json`, which stays supported as a fallback for
- * installs that never ran the onboarding.
+ * The onboarding profile stored in SQLite is the authoritative source.
  */
 async function loadProfile(providedConfig = null) {
   if (cachedProfile) return cachedProfile;
   const config = providedConfig || loadConfig();
-  const profilePath = path.resolve(ROOT, config.profile_path || "./profile.json");
-  const fileProfile = await readJson(profilePath).catch(() => null);
 
   let stored = null;
   try {
     stored = openAppStore(config).getUserProfile();
   } catch {}
 
-  const profile = mergeProfiles(fileProfile || {}, stored?.profile || null);
+  const profile = normalizeProfile(stored?.profile || null);
   if (stored?.resume_text) profile.resume_text = stored.resume_text;
 
   if (!profile?.identity?.full_name || !profile?.professional) {
     throw new Error(
-      `Perfil incompleto: preencha o onboarding na interface web ou mantenha um ${profilePath} válido`
+      "Perfil incompleto: preencha e salve o perfil na interface web"
     );
   }
   cachedProfile = profile;
@@ -437,25 +403,14 @@ export function googleRedirectUri(config) {
 }
 
 /**
- * OAuth client for Google. The credentials configured through the web console
- * (stored in SQLite) win; the legacy `secrets/gmail-oauth-client.json` remains a
- * fallback so existing installs keep working.
+ * OAuth client for Google, configured through the web console and stored in SQLite.
  */
 async function getOAuthClient(config) {
   const stored = readStoredGoogleCredentials(config);
   if (stored?.client?.client_id && stored?.client?.client_secret) {
     return new google.auth.OAuth2(stored.client.client_id, stored.client.client_secret, googleRedirectUri(config));
   }
-
-  const credentialsPath = path.resolve(ROOT, config.gmail.credentials_path);
-  const raw = await fs.readFile(credentialsPath, "utf8").catch(() => null);
-  if (!raw) throw new Error("Nenhum client OAuth do Google configurado. Configure em Configurações › Integrações.");
-  const credentials = JSON.parse(raw);
-  const installed = credentials.installed || credentials.web;
-  if (!installed?.client_id || !installed?.client_secret) {
-    throw new Error(`Invalid Gmail OAuth credentials at ${credentialsPath}`);
-  }
-  return new google.auth.OAuth2(installed.client_id, installed.client_secret, googleRedirectUri(config));
+  throw new Error("Nenhum client OAuth do Google configurado. Configure em Configurações › Integrações.");
 }
 
 function readStoredGoogleCredentials(config) {
@@ -469,8 +424,7 @@ function readStoredGoogleCredentials(config) {
 async function loadAuthorizedGoogleClient(config) {
   const oauth2Client = await getOAuthClient(config);
   const stored = readStoredGoogleCredentials(config);
-  const token = stored?.token
-    || JSON.parse(await fs.readFile(path.resolve(ROOT, config.gmail.token_path), "utf8").catch(() => "null"));
+  const token = stored?.token;
   if (!token) throw new Error("Conta Google não conectada. Conecte em Configurações › Integrações.");
   oauth2Client.setCredentials(token);
 
@@ -633,9 +587,8 @@ async function runGmailAuth() {
   });
 
   const { tokens } = await oauth2Client.getToken(code);
-  const tokenPath = path.resolve(ROOT, config.gmail.token_path);
-  await writeJson(tokenPath, tokens);
-  console.log(JSON.stringify({ status: "authorized", token_path: tokenPath, scopes }, null, 2));
+  openAppStore(config).saveOAuthToken("google", { token: tokens, scopes });
+  console.log(JSON.stringify({ status: "authorized", storage: "database", scopes }, null, 2));
 }
 
 async function runGmailTest() {
@@ -828,44 +781,31 @@ async function skipIfLinkedInDisconnected(pipeline, config) {
 
 async function runAuthStatus() {
   const config = loadConfig();
-  const tokenPath = path.resolve(ROOT, config.gmail.token_path);
-  const token = await fs.readFile(tokenPath, "utf8")
-    .then(JSON.parse)
-    .catch(() => null);
+  const oauth = readStoredGoogleCredentials(config);
+  const token = oauth?.token || null;
   const configuredScopes = config.gmail.scopes || [];
-  const tokenScopeText = token?.scope || "";
-  const tokenScopes = tokenScopeText.split(/\s+/).filter(Boolean);
+  const tokenScopes = oauth?.scopes || String(token?.scope || "").split(/\s+/).filter(Boolean);
   const missingScopes = configuredScopes.filter((scope) => !tokenScopes.includes(scope));
-  const modelEnv = config.model_gate?.api_key_env || "OPENAI_API_KEY";
-  const modelKeysEnv = config.model_gate?.api_keys_env || null;
-  const envKeyCount = modelKeysEnv && process.env[modelKeysEnv]
-    ? process.env[modelKeysEnv].split(/[,\n]/).map((key) => key.trim()).filter(Boolean).length
-    : (process.env[modelEnv] ? 1 : 0);
   const storedGeminiKeys = readStoredApiKeys(config, "gemini").length;
   const storedOpenRouterKeys = readStoredApiKeys(config, "openrouter").length;
-  const modelKeyCount = storedGeminiKeys || envKeyCount;
   const result = {
     run_at: nowIso(),
     model_gate: {
       provider: config.model_gate?.provider || "openai",
       writer_model: config.model_gate?.writer_model,
       validator_model: config.model_gate?.validator_model,
-      keys_env_name: modelKeysEnv,
-      env_name: modelEnv,
-      configured: modelKeyCount > 0,
-      key_count: modelKeyCount,
-      key_source: storedGeminiKeys ? "database" : (envKeyCount ? "env" : "none"),
+      configured: storedGeminiKeys > 0,
+      key_count: storedGeminiKeys,
+      key_source: storedGeminiKeys ? "database" : "none",
       database_key_count: storedGeminiKeys,
-      env_key_count: envKeyCount,
       fallback_provider: config.model_gate?.fallback_provider || null,
       openrouter_model: config.model_gate?.openrouter_model || null,
-      openrouter_configured: Boolean(storedOpenRouterKeys) ||
-        Boolean(process.env[config.model_gate?.openrouter_api_key_env || "OPENROUTER_API_KEY"]),
-      openrouter_key_source: storedOpenRouterKeys ? "database" : "env"
+      openrouter_configured: Boolean(storedOpenRouterKeys),
+      openrouter_key_source: storedOpenRouterKeys ? "database" : "none"
     },
     google_oauth: {
       token_exists: Boolean(token),
-      token_path: tokenPath,
+      storage: "database",
       configured_scopes: configuredScopes,
       token_scopes: tokenScopes,
       missing_scopes: missingScopes,
@@ -1240,41 +1180,13 @@ function buildEasyApplyFormFillerPrompt(job, formFields, modelEvaluation, semant
   ].join("\n");
 }
 
-function getGeminiClient(config) {
-  const envName = config.model_gate?.api_key_env || "GEMINI_API_KEY";
-  const apiKey = process.env[envName];
-  if (!apiKey) throw new Error(`Missing ${envName} for model calls`);
-  return new GoogleGenAI({ apiKey });
-}
-
 /**
  * Keys for a provider, newest configuration first.
  *
- * Keys managed in the local database take precedence over `secrets/.env`, so the
- * web console is the single place to rotate them. Every provider accepts more
- * than one key and consumes them round-robin.
+ * Keys managed in SQLite are the only model credentials used by the app.
  */
 function getProviderApiKeys(config, provider) {
-  const stored = readStoredApiKeys(config, provider);
-  if (stored.length) return stored;
-
-  const envNames = {
-    gemini: [config.model_gate?.api_keys_env || "GEMINI_API_KEYS", config.model_gate?.api_key_env || "GEMINI_API_KEY"],
-    openai: ["OPENAI_API_KEYS", "OPENAI_API_KEY"],
-    openrouter: ["OPENROUTER_API_KEYS", config.model_gate?.openrouter_api_key_env || "OPENROUTER_API_KEY"]
-  }[provider] || [];
-
-  for (const envName of envNames) {
-    const raw = process.env[envName];
-    if (!raw) continue;
-    const keys = raw
-      .split(/[,\n]/)
-      .map((key) => key.trim())
-      .filter(Boolean)
-      .map((secret, index) => ({ id: null, label: `${envName}[${index}]`, secret }));
-    if (keys.length) return keys;
-  }
-  return [];
+  return readStoredApiKeys(config, provider);
 }
 
 function getGeminiApiKeys(config) {
@@ -1291,7 +1203,7 @@ function readStoredApiKeys(config, provider) {
   }
 }
 
-/** First enabled key for a provider, with the legacy env variable as fallback. */
+/** First enabled key for a provider. */
 function getProviderApiKey(config, provider) {
   return getProviderApiKeys(config, provider)[0] || null;
 }
@@ -1425,6 +1337,19 @@ function inspectEasyApplyFieldSafety(fields, config, profile = null) {
     const trustedSensitive = trustedSensitiveProfileAnswer(field, profile);
     if (trustedSensitive) {
       trustedSensitiveAnswers.push({ field_id: field.field_id, value: trustedSensitive, confidence: 100, source: "trusted_sensitive_profile" });
+      continue;
+    }
+    // Salary is answered from the profile only when the label states both the
+    // currency and the period. Anything less falls through to the block below,
+    // because a bare number here is wrong by 5x or 12x, not by a rounding error.
+    const salary = resolveSalaryAnswer(field?.label, profile);
+    if (salary) {
+      trustedSensitiveAnswers.push({
+        field_id: field.field_id,
+        value: salary.value,
+        confidence: 100,
+        source: `trusted_salary_${salary.currency.toLowerCase()}_${salary.period}`
+      });
       continue;
     }
     const optOut = sensitiveDemographicOptOut(field);
@@ -1749,8 +1674,7 @@ async function callJsonModel({ model, prompt, maxOutputTokens, responseSchema = 
 }
 
 /**
- * Effective routing: the roles stored in the database, falling back to the
- * legacy `model_gate` configuration for installs that never set them.
+ * Effective routing from provider roles stored in SQLite.
  */
 function resolveModelRoute(config) {
   let providers = [];
@@ -1760,15 +1684,7 @@ function resolveModelRoute(config) {
 
   const primary = providers.find((provider) => provider.role === "primary");
   const fallback = providers.find((provider) => provider.role === "fallback");
-  if (primary) return { primary, fallback: fallback || null };
-
-  // Legacy: provider names and models straight from the configuration.
-  const legacyPrimary = config.model_gate?.provider;
-  const legacyFallback = config.model_gate?.fallback_provider;
-  return {
-    primary: legacyPrimary ? { id: legacyPrimary, model: config.model_gate?.job_model || config.model_gate?.validator_model } : null,
-    fallback: legacyFallback ? { id: legacyFallback, model: config.model_gate?.openrouter_model } : null
-  };
+  return { primary: primary || null, fallback: fallback || null };
 }
 
 async function callProviderJsonModel({ provider, model, prompt, maxOutputTokens, responseSchema, schemaName, config }) {
@@ -1932,8 +1848,8 @@ async function maybeCreateCalendarEvent(conversation, config, state) {
     requestBody: {
       summary: extracted.title || `Interview - ${conversation.participant_name || "LinkedIn"}`,
       description: extracted.description || `Created from LinkedIn conversation: ${conversation.conversation_url}`,
-      start: { dateTime: extracted.start_iso, timeZone: config.calendar.timezone },
-      end: { dateTime: extracted.end_iso, timeZone: config.calendar.timezone },
+      start: { dateTime: extracted.start_iso, timeZone: config.timezone },
+      end: { dateTime: extracted.end_iso, timeZone: config.timezone },
       reminders: {
         useDefault: false,
         overrides: [{ method: "popup", minutes: config.calendar.reminder_minutes || 30 }]
@@ -2491,7 +2407,7 @@ async function runDmMock() {
   };
 
   let modelFlow;
-  if (config.model_gate?.provider === "gemini" || process.env[config.model_gate?.api_key_env || "OPENAI_API_KEY"]) {
+  if (resolveModelRoute(config).primary) {
     modelFlow = await draftAndValidateDm(mockConversation, config);
   } else {
     const draft = {
@@ -2627,8 +2543,7 @@ async function runStorageStatus() {
       needs_review: Object.keys(state.jobs?.needs_review || {}).length,
       job_runs: Array.isArray(state.jobs?.runs) ? state.jobs.runs.length : 0
     },
-    semantic_memory: store.stats(),
-    legacy_backup_preserved: await fs.access(path.resolve(ROOT, config.storage?.legacy_state_path || "./state.json")).then(() => true).catch(() => false)
+    semantic_memory: store.stats()
   }, null, 2));
 }
 
@@ -2893,7 +2808,7 @@ async function fillLinkedInAutocomplete(page, input, value) {
   return { ok: false, reason: "matching_option_not_found" };
 }
 
-async function answerKnownQuestions(page, config) {
+async function answerKnownQuestions(page, config, profile = null) {
   const blocked = [];
   const answered = [];
   const unknown = [];
@@ -2919,6 +2834,23 @@ async function answerKnownQuestions(page, config) {
       return clean(explicit?.textContent || aria || placeholder || ancestor?.textContent || "");
     }).catch(() => "");
     if (/^middle name$/i.test(labelText)) continue;
+    // A salary field with a stated currency and period is answered from the
+    // profile; without both, it falls into the block below rather than taking
+    // a learned literal that carries no unit at all.
+    if (isSalaryLabel(labelText)) {
+      const salary = resolveSalaryAnswer(labelText, profile);
+      if (salary) {
+        await input.fill(salary.value, { timeout: 3000 }).catch(() => {});
+        answered.push({
+          question: labelText.slice(0, 160),
+          value: salary.value,
+          source: `trusted_salary_${salary.currency.toLowerCase()}_${salary.period}`
+        });
+        continue;
+      }
+      blocked.push(`${labelText.slice(0, 180)} [${explainSalaryRefusal(labelText, profile) || "salario"}]`);
+      continue;
+    }
     if (blockedPatterns.some((re) => re.test(labelText))) {
       blocked.push(labelText.slice(0, 220));
       continue;
@@ -3471,7 +3403,7 @@ async function attemptEasyApply(page, job, config, modelEvaluation = null) {
     if (!resume.ok) return { status: "needs_review", reason: resume.reason, audit };
     resumeConfirmed ||= Boolean(resume.confirmed);
 
-    const answers = await answerKnownQuestions(page, config);
+    const answers = await answerKnownQuestions(page, config, profile);
     audit.steps.push({ step: `answers_${step}`, ...answers });
     if (answers.blocked?.length) return { status: "needs_review", reason: "blocked_question", audit };
 
@@ -4174,7 +4106,6 @@ async function runJobsFormSmoke() {
 }
 
 async function main() {
-  await loadLocalEnv();
   const command = process.argv[2];
   if (command === "dm:check") {
     await runDmCheck();

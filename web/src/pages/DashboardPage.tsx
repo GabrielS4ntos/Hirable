@@ -126,7 +126,7 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
               <TableRow className="hover:bg-transparent">
                 <TableHead>{t("dashboard.pipeline")}</TableHead>
                 <TableHead className="w-24">{t("dashboard.origin")}</TableHead>
-                <TableHead className="w-28">{t("dashboard.status")}</TableHead>
+                <TableHead className="w-28">{t("dashboard.statusHeader")}</TableHead>
                 <TableHead className="w-36">{t("dashboard.start")}</TableHead>
                 <TableHead className="w-24">{t("dashboard.duration")}</TableHead>
                 <TableHead>{t("dashboard.summary")}</TableHead>
@@ -166,7 +166,7 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
 
 function statusVariant(status: string) {
   if (status === "success") return "success" as const;
-  if (status === "running") return "warning" as const;
+  if (status === "running") return "default" as const;
   if (status === "failed" || status === "stale") return "destructive" as const;
   return "secondary" as const;
 }

@@ -139,11 +139,6 @@ export function GeneralSettingsCard() {
           </p>
         ) : null}
 
-        {config.data?.legacy_config_file ? (
-          <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            {t("settings.legacy", { database: config.data.imported_at ? t("settings.toDatabase") : "" })}
-          </p>
-        ) : null}
       </CardContent>
     </Card>
   );

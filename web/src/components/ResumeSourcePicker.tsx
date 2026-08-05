@@ -118,7 +118,7 @@ export function ResumeSourcePicker({
             onClick={() => onSourceChange(option)}
             className={cn(
               "rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-              source === option ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              source === option ? "bg-brand text-white" : "text-muted-foreground hover:text-foreground"
             )}
           >
             {option === "text" ? t("resume.sourceText") : t("resume.sourceFile")}
@@ -154,7 +154,7 @@ export function ResumeSourcePicker({
                   {t("resume.analyzed")}
                 </Badge>
               ) : resume.index_error ? (
-                <Badge variant="warning">{t("resume.noAnalysis")}</Badge>
+                <Badge variant="secondary">{t("resume.noAnalysis")}</Badge>
               ) : (
                 <Badge variant="secondary" className="gap-1">
                   <Loader2 className="size-3 animate-spin" />
@@ -165,7 +165,7 @@ export function ResumeSourcePicker({
             <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
               {resume.original_name} · {formatSize(resume.size_bytes)}
             </p>
-            {resume.index_error ? <p className="mt-1 text-xs text-warning">{resume.index_error}</p> : null}
+            {resume.index_error ? <p className="mt-1 text-xs text-muted-foreground">{resume.index_error}</p> : null}
             <p className="mt-2 text-xs text-muted-foreground">{t("resume.singleFileHelp")}</p>
           </div>
           <Button variant="outline" size="sm" onClick={remove} disabled={removing}>

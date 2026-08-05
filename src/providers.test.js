@@ -23,6 +23,12 @@ test("the catalog carries the three providers with suggested models", () => {
   }
 });
 
+test("OpenAI uses the current GPT-5.6 family with Terra as default", () => {
+  const provider = getProvider("openai");
+  assert.deepEqual(provider.models, ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"]);
+  assert.equal(provider.default_model, "gpt-5.6-terra");
+});
+
 test("naming a primary demotes the previous one", () => {
   const roles = applyRoleChange(state([["gemini", "primary"], ["openai", "none"], ["openrouter", "none"]]), "openai", "primary");
   assert.equal(roles.openai, "primary");

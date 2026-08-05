@@ -53,13 +53,13 @@ terminal, or an OS scheduler with no coordination beyond a run lock. Any invaria
 hold has to be enforced in *both* the API/scheduler and the CLI — enforcing it only in the UI
 is not enforcement.
 
-**Config layering** (`src/config.js`): `DEFAULTS` ← `config.json` (legacy, optional) ←
-database overrides ← environment, and then `SAFETY` is force-applied last so nothing can
+**Config layering** (`src/config.js`): `DEFAULTS` ← database overrides ← environment, and
+then `SAFETY` is force-applied last so nothing can
 widen it. `src/config-defaults.js` holds `SAFETY`, `HARD_LIMITS` and the `EDITABLE` whitelist
 that the settings screen is generated from. **Guard rails live in code, not in the database**,
 deliberately: a bug or prompt injection reaching a write path must not be able to widen what
 the agent discloses. Adding a user-editable setting means adding it to `EDITABLE` with a
-coercion type — never reading `config.json` directly.
+coercion type. User configuration and secrets are stored in SQLite, never project files.
 
 **The profile is the agents' only trusted source of facts** about the user (`profile-schema.js`
 defines one contract shared by the UI form, the extraction prompt and the agents). A résumé
@@ -71,8 +71,7 @@ declare — silence is never a yes — and the same guard runs on manual sends.
 are missing. It is checked in four places because each can be reached independently: the
 scheduler (`tick`, `enqueue`, `enqueueCommand`, and a final check in `#drain` before spawn),
 the HTTP API (arming a schedule, "run now", manual send), the CLI entry points, and the UI.
-Readiness is decided by the profile data itself, **not** by the `onboarding_complete` flag —
-installs whose only profile is a complete `profile.json` must keep working.
+Readiness is decided by the profile data itself, **not** by the `onboarding_complete` flag.
 
 **Standardized records** (`agent-record.js`): jobs, DMs and invites normalize into one shape
 in one table so the interface can show them together. `send_state` (`SEND_STATES` /
@@ -157,5 +156,5 @@ is detected (`service-restart.js`), since exiting unsupervised stops the service
   a test asserting no unaccented placeholders in labels).
 - Comments explain *why* a constraint exists, not what the line does; several of them encode
   reasoning that is expensive to re-derive.
-- Local data (`config.json`, `profile.json`, `data/`, `secrets/`, `.browser-profile/`, `logs/`,
-  machine-specific launchd plists) is gitignored and must stay out of commits.
+- Application stores (`data/`, `.browser-profile/`, `logs/`, machine-specific launchd plists)
+  are gitignored and must stay out of commits.

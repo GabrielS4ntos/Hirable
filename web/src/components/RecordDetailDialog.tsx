@@ -47,7 +47,7 @@ export function RecordDetailDialog({
           <Badge variant="outline">{c.method}: {record.send_method}</Badge>
           {record.variant ? <Badge variant="outline">{c.resume}: {record.variant}</Badge> : null}
           {record.risk_flags.map((flag) => (
-            <Badge key={flag} variant="warning">
+            <Badge key={flag} variant="destructive">
               {flag}
             </Badge>
           ))}

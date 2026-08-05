@@ -75,7 +75,7 @@ export function ProviderCards({
                   <div className="leading-tight">
                     <p className="text-sm font-semibold">{provider.label}</p>
                     <p className="font-mono text-xs text-muted-foreground">
-                      {provider.configured ? provider.model : provider.key_hint}
+                      {provider.model || provider.default_model}
                     </p>
                   </div>
                 </div>
@@ -107,18 +107,18 @@ export function ProviderCards({
                 </p>
               )}
 
-              <div className="mt-auto flex flex-wrap gap-1.5">
-                <Button size="sm" variant={provider.configured ? "outline" : "default"} onClick={() => setEditing(provider)}>
-                  {provider.configured ? <Plus /> : <KeyRound />}
-                  {provider.configured ? t("provider.addKey") : t("provider.configure")}
-                </Button>
-
+              <div className="mt-auto flex flex-col items-stretch gap-1.5">
                 {provider.configured && provider.role !== "primary" ? (
                   <Button size="sm" variant="ghost" disabled={busy === provider.id} onClick={() => setRole(provider, "primary")}>
                     {busy === provider.id ? <Loader2 className="animate-spin" /> : <Zap />}
                     {t("provider.makePrimary")}
                   </Button>
-                ) : null}
+                ) : (
+                  <Button size="sm" variant="ghost" disabled>
+                    <Zap />
+                    {provider.role === "primary" ? t("provider.currentPrimary") : t("provider.makePrimary")}
+                  </Button>
+                )}
 
                 {provider.configured && provider.role === "none" && configuredCount > 2 ? (
                   <Button size="sm" variant="ghost" disabled={busy === provider.id} onClick={() => setRole(provider, "fallback")}>
@@ -126,6 +126,11 @@ export function ProviderCards({
                     {t("provider.useFallback")}
                   </Button>
                 ) : null}
+
+                <Button size="sm" variant={provider.configured ? "outline" : "default"} onClick={() => setEditing(provider)}>
+                  {provider.configured ? <Plus /> : <KeyRound />}
+                  {provider.configured ? t("provider.addKey") : t("provider.configure")}
+                </Button>
               </div>
             </div>
           );

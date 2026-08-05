@@ -1,11 +1,15 @@
-# LinkedIn Local Agent
+<p align="center">
+  <img src="docs/screenshots/logo.svg" alt="Hirable" width="320">
+</p>
+
+# Hirable
 
 A local job-search assistant. It scans LinkedIn for openings, evaluates each one against
 your profile with an LLM, and submits Easy Apply applications — either on a schedule you
 control or one click at a time. It also drafts replies to recruiter DMs and accepts pending
 connection invitations.
 
-Everything runs on your machine, against your own browser session and your own API keys.
+Hirable runs on your machine, against your own browser session and your own API keys.
 There is no server, no account, and no data leaves your computer except the calls you make
 to the model provider.
 
@@ -56,12 +60,17 @@ Three decisions follow from that:
 
 | | |
 |---|---|
-| **Dashboard** — counters, per-pipeline status and run history | **Analyzed jobs** — every item in one table with a send button |
+| **Dashboard** — counters, per-pipeline status and run history | **Analyzed jobs** — every item in one table, with the send state per row |
 | <img src="docs/screenshots/dashboard.jpg" alt="Dashboard" width="100%"> | <img src="docs/screenshots/jobs.jpg" alt="Analyzed jobs" width="100%"> |
-| **Onboarding** — configure a provider, paste a résumé, an agent fills the profile | **Provider setup** — key, model and role in one dialog |
-| <img src="docs/screenshots/onboarding.jpg" alt="Onboarding" width="100%"> | <img src="docs/screenshots/provider-dialog.jpg" alt="Provider dialog" width="100%"> |
-| **Settings** — Google integration and pipeline behaviour | **Analyzed jobs** — send state per row |
-| <img src="docs/screenshots/settings-pipelines.jpg" alt="Pipeline settings" width="100%"> | <img src="docs/screenshots/jobs.jpg" alt="Analyzed jobs" width="100%"> |
+| **Onboarding** — connect LinkedIn, configure a provider, fill the profile from a résumé | **Record detail** — why the agent decided what it decided |
+| <img src="docs/screenshots/onboarding.jpg" alt="Onboarding" width="100%"> | <img src="docs/screenshots/job-detail.jpg" alt="Record detail" width="100%"> |
+| **Settings › Integrations** — the LinkedIn session and the Google account | **Settings › Alerts** — grouped failures and the CLI agents |
+| <img src="docs/screenshots/settings-linkedin.jpg" alt="Integrations" width="100%"> | <img src="docs/screenshots/settings-alerts.jpg" alt="Alerts and auto-fix" width="100%"> |
+| **Settings › Pipelines** — mode, cron, allowed window and jitter | **Profile** — the single form shared with the onboarding |
+| <img src="docs/screenshots/settings-pipelines.jpg" alt="Pipeline scheduling" width="100%"> | <img src="docs/screenshots/profile.jpg" alt="Profile" width="100%"> |
+
+> The screenshots come from a seeded demo database, not from a real account — see
+> [Development](#development).
 
 ## Requirements
 
@@ -156,12 +165,11 @@ Settings resolve in this order, later winning:
 | Source | Purpose |
 |---|---|
 | `src/config-defaults.js` | Defaults in code — a fresh install boots with no files |
-| `config.json` | Optional legacy override, imported into the database on first boot |
 | Database | What you changed in *Configurações* |
 | Environment | Deployment-level overrides |
 
-Environment variables: `AGENT_DATABASE_PATH`, `AGENT_PROFILE_PATH`,
-`AGENT_BROWSER_PROFILE_DIR`, `LINKEDIN_HEADLESS`, `GOOGLE_REDIRECT_PORT`, `WEB_HOST`,
+Environment variables: `AGENT_DATABASE_PATH`, `AGENT_BROWSER_PROFILE_DIR`,
+`LINKEDIN_HEADLESS`, `GOOGLE_REDIRECT_PORT`, `WEB_HOST`,
 `WEB_PORT`.
 
 Two things are deliberately **not** editable through the interface:
@@ -339,7 +347,7 @@ service instead of restarting it. Changes are left in the working tree: the agen
 ```
 src/
   cli.js               pipelines: dm:check, network:accept, jobs:scan, jobs:apply-one
-  config.js            resolves defaults ← config.json ← database ← environment
+  config.js            resolves defaults ← database ← environment
   config-defaults.js   defaults, safety rails, hard limits, editable whitelist
   profile-schema.js    the profile contract: UI, extraction prompt and agents
   agent-record.js      one canonical record shape for every pipeline
@@ -385,15 +393,29 @@ npm run web:dev    # Vite dev server on :4322, proxies /api
 npm test
 ```
 
-Local data — `config.json`, `profile.json`, `data/`, `secrets/`, `.browser-profile/`, logs
-and machine-specific launchd files — is gitignored. Never commit API keys, tokens or résumés.
+**Demo data and screenshots.** `scripts/seed-demo.mjs` fills a throwaway database with
+believable rows in every table — jobs across all send states, DMs, invitations, run history,
+grouped alerts, résumés, providers. It refuses to write inside `data/`, because these rows are
+fiction and must never mix with a real profile or real keys.
+
+```bash
+node scripts/seed-demo.mjs /tmp/demo/app.sqlite
+AGENT_DISABLE_SCHEDULER=1 AGENT_DATABASE_PATH=/tmp/demo/app.sqlite npm run web
+node scripts/screenshots.mjs http://127.0.0.1:4321   # regenerates docs/screenshots/
+```
+
+`AGENT_DISABLE_SCHEDULER=1` serves the console without ever acting: nothing is scheduled and
+no browser opens. Use it whenever you want to look at a database rather than run against it —
+a demo database has automatic pipelines in it, and they would otherwise fire for real.
+
+Application data — `data/`, `.browser-profile/`, logs and machine-specific launchd files —
+is gitignored. User settings, API keys, OAuth tokens and profile data live in SQLite.
 
 ## Troubleshooting
 
-**"Perfil incompleto"** — complete the onboarding, or keep a valid `profile.json`.
+**"Perfil incompleto"** — complete and save the onboarding in the web interface.
 
-**"Nenhuma chave Gemini cadastrada"** — add a key under *Chaves de API*, or export
-`GEMINI_API_KEYS` in `secrets/.env`.
+**"Nenhuma chave Gemini cadastrada"** — add a key under *Chaves de API*.
 
 **A pipeline reports `needs_login`** — the LinkedIn session expired. Reconnect from the
 LinkedIn card in *Configurações*.
@@ -410,6 +432,11 @@ schedules stay armed and resume on their own once the session is back.
 
 **Chromium crashes in Docker** — increase `shm_size` in `compose.yaml`.
 
+## Brand
+
+Palette, gradient rules and mark usage live in [`docs/brand-guidelines.md`](docs/brand-guidelines.md).
+The values come from `web/public/logo.svg`, so the interface and the logo cannot drift apart.
+
 ## Disclaimer
 
 This project automates a logged-in LinkedIn session. That is against LinkedIn's User
@@ -420,3 +447,7 @@ before turning any pipeline to automatic.
 
 The agent submits real applications to real companies on your behalf. Review the analyzed
 jobs before enabling automatic Easy Apply.
+
+---
+
+© 2026 Hirable. All rights reserved.

@@ -9,61 +9,90 @@
 :root {
   --radius: 0.625rem;
 
-  --background: oklch(0.99 0.002 250);
+  /*
+    The brand white, #fcfcfc. It is the surface colour and the text colour on
+    every filled control, in both themes — a filled button must never fall back
+    to a near-black foreground token.
+  */
+  --white: oklch(0.991 0 0);
+
+  /*
+    Brand, taken from the gradients inside public/logo.svg. The mark runs azure
+    to violet on its left half and lilac to deep violet on its right, so the
+    identity is a *range*, not one colour — `--brand-gradient` is that range and
+    is what the interface should reach for when something is meant to feel like
+    Hirable rather than like a control.
+  */
+  --brand-azure: oklch(0.676 0.178 250);
+  --brand-blue: oklch(0.586 0.226 262);
+  --brand-violet: oklch(0.519 0.267 280);
+  --brand-lilac: oklch(0.641 0.210 292);
+  --brand-gradient: linear-gradient(135deg, var(--brand-azure) 0%, var(--brand-blue) 38%, var(--brand-violet) 74%, var(--brand-lilac) 100%);
+  --brand-gradient-soft: linear-gradient(135deg, oklch(0.676 0.178 250 / 0.14), oklch(0.641 0.21 292 / 0.14));
+
+  --background: oklch(0.971 0.004 280);
   --foreground: oklch(0.21 0.02 260);
-  --card: oklch(1 0 0);
+  --card: var(--white);
   --card-foreground: oklch(0.21 0.02 260);
-  --popover: oklch(1 0 0);
+  --popover: var(--white);
   --popover-foreground: oklch(0.21 0.02 260);
 
-  --primary: oklch(0.55 0.15 250);
-  --primary-foreground: oklch(0.99 0.005 250);
-  --secondary: oklch(0.96 0.005 250);
-  --secondary-foreground: oklch(0.3 0.02 260);
-  --muted: oklch(0.96 0.005 250);
-  --muted-foreground: oklch(0.52 0.015 260);
-  --accent: oklch(0.95 0.02 250);
-  --accent-foreground: oklch(0.3 0.03 260);
+  --primary: oklch(0.55 0.24 278);
+  --primary-foreground: var(--white);
+  --secondary: oklch(0.96 0.008 280);
+  --secondary-foreground: oklch(0.3 0.025 278);
+  --muted: oklch(0.96 0.008 280);
+  --muted-foreground: oklch(0.52 0.018 278);
+  --accent: oklch(0.95 0.03 280);
+  --accent-foreground: oklch(0.3 0.04 280);
 
   --destructive: oklch(0.58 0.2 25);
-  --destructive-foreground: oklch(0.99 0.005 250);
+  --destructive-foreground: var(--white);
   --success: oklch(0.6 0.13 155);
-  --success-foreground: oklch(0.99 0.005 250);
+  --success-foreground: var(--white);
+  /* Kept defined, unused by the interface: the palette is brand + success +
+     destructive, so a fourth colour would dilute what the other three mean. */
   --warning: oklch(0.72 0.15 75);
   --warning-foreground: oklch(0.24 0.03 60);
 
-  --border: oklch(0.91 0.005 250);
-  --input: oklch(0.91 0.005 250);
-  --ring: oklch(0.55 0.15 250);
+  --border: oklch(0.91 0.008 280);
+  --input: oklch(0.91 0.008 280);
+  --ring: oklch(0.55 0.24 278);
 }
 
 .dark {
-  --background: oklch(0.17 0.012 260);
-  --foreground: oklch(0.95 0.006 250);
-  --card: oklch(0.21 0.014 260);
-  --card-foreground: oklch(0.95 0.006 250);
-  --popover: oklch(0.21 0.014 260);
-  --popover-foreground: oklch(0.95 0.006 250);
+  --background: oklch(0.17 0.016 280);
+  --foreground: oklch(0.95 0.008 280);
+  --card: oklch(0.212 0.018 280);
+  --card-foreground: oklch(0.95 0.008 280);
+  --popover: oklch(0.212 0.018 280);
+  --popover-foreground: oklch(0.95 0.008 280);
 
-  --primary: oklch(0.68 0.14 245);
-  --primary-foreground: oklch(0.17 0.02 260);
-  --secondary: oklch(0.27 0.016 260);
-  --secondary-foreground: oklch(0.93 0.006 250);
-  --muted: oklch(0.26 0.014 260);
-  --muted-foreground: oklch(0.68 0.012 255);
-  --accent: oklch(0.29 0.02 260);
+  --primary: oklch(0.7 0.19 278);
+  --primary-foreground: var(--white);
+  --secondary: oklch(0.27 0.022 280);
+  --secondary-foreground: oklch(0.93 0.008 280);
+  --muted: oklch(0.26 0.02 280);
+  --muted-foreground: oklch(0.68 0.016 280);
+  --accent: oklch(0.3 0.035 280);
   --accent-foreground: oklch(0.95 0.006 250);
 
   --destructive: oklch(0.62 0.19 25);
-  --destructive-foreground: oklch(0.98 0.005 250);
+  --destructive-foreground: var(--white);
   --success: oklch(0.68 0.14 158);
-  --success-foreground: oklch(0.17 0.02 260);
+  --success-foreground: var(--white);
   --warning: oklch(0.76 0.14 78);
   --warning-foreground: oklch(0.19 0.03 60);
 
-  --border: oklch(0.3 0.015 260);
-  --input: oklch(0.32 0.015 260);
-  --ring: oklch(0.68 0.14 245);
+  --border: oklch(0.3 0.02 280);
+  --input: oklch(0.32 0.02 280);
+  --ring: oklch(0.7 0.19 278);
+
+  /* Lifted for dark surfaces; the mark itself keeps the values above. */
+  --brand-azure: oklch(0.72 0.16 250);
+  --brand-blue: oklch(0.66 0.2 262);
+  --brand-violet: oklch(0.62 0.24 282);
+  --brand-lilac: oklch(0.72 0.17 292);
 }
 
 @theme inline {
@@ -90,6 +119,11 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --color-white: var(--white);
+  --color-brand-azure: var(--brand-azure);
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-violet: var(--brand-violet);
+  --color-brand-lilac: var(--brand-lilac);
 
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
@@ -156,4 +190,24 @@
       animation: none;
     }
   }
+}
+
+/*
+  Brand gradient utilities. Deliberately few: the gradient marks identity
+  (the logo, the first-run header, an empty state), never ordinary controls —
+  a gradient on every button is how a brand stops meaning anything.
+*/
+@utility bg-brand {
+  background-image: var(--brand-gradient);
+}
+
+@utility bg-brand-soft {
+  background-image: var(--brand-gradient-soft);
+}
+
+@utility text-brand {
+  background-image: var(--brand-gradient);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
 }

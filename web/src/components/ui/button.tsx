@@ -8,9 +8,15 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/90",
-        destructive: "bg-destructive text-destructive-foreground hover:bg-destructive/90",
-        success: "bg-success text-success-foreground hover:bg-success/90",
+        // The brand gradient lives on the primary action, which is the one place
+        // per screen where identity and hierarchy want the same thing.
+        //
+        // Every filled variant states `text-white` rather than leaning on a
+        // *-foreground token: in the dark theme those tokens are near-black, so
+        // a filled button ended up with dark text on a saturated fill.
+        default: "bg-brand text-white shadow-sm hover:brightness-110",
+        destructive: "bg-destructive text-white hover:bg-destructive/90",
+        success: "bg-success text-white hover:bg-success/90",
         outline: "border border-border bg-transparent hover:bg-accent hover:text-accent-foreground",
         secondary: "bg-secondary text-secondary-foreground hover:bg-secondary/80",
         ghost: "hover:bg-accent hover:text-accent-foreground",

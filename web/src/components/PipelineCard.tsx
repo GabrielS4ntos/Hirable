@@ -167,7 +167,7 @@ export function PipelineCard({
           <p className="font-mono text-xs text-muted-foreground">npm run {schedule.command.replace(":", ":")}</p>
         </div>
         <div className="flex items-center gap-2">
-          {gateBlocked ? <Badge variant="warning">{t("gate.blockedBadge")}</Badge> : null}
+          {gateBlocked ? <Badge variant="default">{t("gate.blockedBadge")}</Badge> : null}
           <Button variant="outline" size="sm" onClick={runNow} disabled={running || draft.mode === "off" || gateBlocked}>
             {running ? <Loader2 className="animate-spin" /> : <Play />}
             {c.runNow}

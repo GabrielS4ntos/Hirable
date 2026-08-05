@@ -56,7 +56,7 @@ export function OnboardingPipelines({ onFinish, onBack }: { onFinish: () => void
         <CardContent>
           <ResumeUploads resumes={resumes} onChange={setResumes} />
           {!resumes.length ? (
-            <p className="mt-3 rounded-md border border-warning/40 bg-warning/5 px-3 py-2 text-xs text-warning">
+            <p className="mt-3 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-xs text-primary">
               {t("onboarding.resumesRequired")}
             </p>
           ) : null}

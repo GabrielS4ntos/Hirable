@@ -3,8 +3,7 @@
  *
  * A fresh install must work with no files to edit: these defaults boot the app,
  * and everything the user is meant to change is stored in SQLite and edited in
- * the web console. `config.json` remains supported as a legacy override so
- * existing installs keep working, but it is no longer required.
+ * the web console.
  *
  * Three tiers:
  *  - BOOTSTRAP  paths needed before the database can be opened; env-overridable.
@@ -25,31 +24,69 @@ export const SAFETY = Object.freeze({
   stop_on_captcha: true,
   stop_on_checkpoint: true,
   stop_on_logout: true,
+  // Both languages, deliberately. The list decides what the agent refuses to
+  // answer on the user's behalf, and it was English-only: on a Portuguese
+  // LinkedIn — which is what most users of this project see — "pretensão
+  // salarial", "visto de trabalho", "aviso prévio" and "data de nascimento"
+  // walked straight past it. A guard rail that only holds in one language is
+  // not a guard rail.
   blocked_question_patterns: Object.freeze([
+    // Work authorisation
     "visa",
     "sponsorship",
     "work authorization",
     "authorized to work",
     "security clearance",
     "government clearance",
+    "visto",
+    "patroc[ií]nio",
+    "autoriza[cç][aã]o de trabalho",
+    "permiss[aã]o de trabalho",
+    // Availability
     "start date",
     "notice period",
+    "data de in[ií]cio",
+    "aviso pr[ée]vio",
+    "disponibilidade para in[ií]cio",
+    // Money
     "salary",
     "compensation",
+    "sal[aá]rio",
+    "pretens[aã]o",
+    "remunera[cç][aã]o",
+    // Demographics
     "\\brace\\b",
     "ethnicity",
     "gender",
     "disability",
     "veteran",
+    "ra[cç]a",
+    "etnia",
+    "g[eê]nero",
+    "identidade de g[eê]nero",
+    "orienta[cç][aã]o sexual",
+    "defici[eê]ncia",
+    "\\bpcd\\b",
+    "veterano",
+    // Age
     "date of birth",
     "birth date",
     "\\bage\\b",
+    "data de nascimento",
+    "\\bidade\\b",
+    // Records and identifiers
     "criminal",
     "government id",
     "national id",
     "passport",
     "identity document",
-    "social security"
+    "social security",
+    "antecedentes",
+    "ficha criminal",
+    "\\bcpf\\b",
+    "\\brg\\b",
+    "documento de identidade",
+    "carteira de trabalho"
   ])
 });
 
@@ -66,8 +103,6 @@ export const HARD_LIMITS = Object.freeze({
 
 export const DEFAULTS = {
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo",
-  profile_path: "./profile.json",
-
   pause: {
     enabled: true,
     start: "22:00",
@@ -76,8 +111,7 @@ export const DEFAULTS = {
   },
 
   storage: {
-    database_path: "./data/semantic-memory.sqlite",
-    legacy_state_path: "./state.json"
+    database_path: "./data/semantic-memory.sqlite"
   },
 
   browser: {
@@ -110,9 +144,6 @@ export const DEFAULTS = {
   },
 
   gmail: {
-    // Legacy file locations, still read when the database has no credentials.
-    credentials_path: "./secrets/gmail-oauth-client.json",
-    token_path: "./secrets/gmail-token.json",
     redirect_port: 45819,
     scopes: [
       "https://www.googleapis.com/auth/gmail.send",
@@ -192,13 +223,10 @@ export const DEFAULTS = {
   model_gate: {
     enabled: true,
     provider: "gemini",
-    api_keys_env: "GEMINI_API_KEYS",
-    api_key_env: "GEMINI_API_KEY",
     writer_model: "gemini-3.5-flash-lite",
     validator_model: "gemini-3.5-flash-lite",
     job_model: "gemini-3.5-flash-lite",
     fallback_provider: "openrouter",
-    openrouter_api_key_env: "OPENROUTER_API_KEY",
     openrouter_model: "google/gemini-3.5-flash-lite",
     max_output_tokens: 600,
     profile_extractor_max_output_tokens: 8000

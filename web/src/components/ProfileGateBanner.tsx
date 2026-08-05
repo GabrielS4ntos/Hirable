@@ -44,8 +44,8 @@ export function ProfileGateBanner({
   const action = linkedinBlocked ? onGoToSettings : onGoToProfile;
 
   return (
-    <div className="flex flex-wrap items-start gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3">
-      <Icon className="mt-0.5 size-5 shrink-0 text-warning" />
+    <div className="bg-brand-soft flex flex-wrap items-start gap-3 rounded-xl border border-primary/40 px-4 py-3">
+      <Icon className="mt-0.5 size-5 shrink-0 text-primary" />
       <div className="min-w-56 flex-1 space-y-1">
         <p className="text-sm font-semibold">{title}</p>
         <p className="text-sm text-muted-foreground">{description}</p>

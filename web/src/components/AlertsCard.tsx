@@ -4,7 +4,7 @@ import { api, type AlertEvent, type AutoFixState, type CliAgent, type Notificati
 import { formatDateTime } from "@/lib/format";
 import { localizedError, useI18n } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { IntegrationCard, SettingRow, SettingsGroup, StatusPill } from "@/components/ui/integration";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -64,18 +64,20 @@ export function AlertsCard() {
   const suppressedTotal = alerts.reduce((sum, alert) => sum + (alert.occurrences - alert.notified_count), 0);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <BellRing className="size-4" />
-          {t("alerts.title")}
-        </CardTitle>
-        <CardDescription>{t("alerts.description")}</CardDescription>
-      </CardHeader>
-
-      <CardContent className="space-y-5">
-        <div className="space-y-2">
-          <Label htmlFor="dedupe-minutes">{t("alerts.window")}</Label>
+    <IntegrationCard
+      icon={<BellRing className="size-4" />}
+      title={t("alerts.title")}
+      description={t("alerts.description")}
+      status={
+        <StatusPill
+          tone={settings?.auto_fix_enabled ? "ok" : "idle"}
+          label={settings?.auto_fix_enabled ? t("alerts.autoFixOn") : t("alerts.autoFixOff")}
+        />
+      }
+    >
+      <div className="space-y-5">
+        <SettingsGroup title={t("alerts.window")} description={t("alerts.windowHelp")}>
+          <Label htmlFor="dedupe-minutes" className="sr-only">{t("alerts.window")}</Label>
           <div className="flex flex-wrap items-center gap-2">
             <Input
               id="dedupe-minutes"
@@ -106,29 +108,22 @@ export function AlertsCard() {
             </div>
             {busy === "alert_dedupe_minutes" ? <Loader2 className="size-4 animate-spin text-muted-foreground" /> : null}
           </div>
-          <p className="text-xs text-muted-foreground">{t("alerts.windowHelp")}</p>
-        </div>
-
-        <Separator />
+        </SettingsGroup>
 
         <div className="space-y-3">
-          <div className="flex items-start justify-between gap-4 rounded-lg border border-border p-3">
-            <div className="space-y-0.5">
-              <p className="flex items-center gap-1.5 text-sm font-medium">
-                <Wrench className="size-4" />
-                {t("alerts.autoFix")}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {autoFix?.ready ? t("alerts.autoFixHelp") : t("alerts.autoFixBlocked")}
-              </p>
-            </div>
-            <Switch
-              checked={Boolean(settings?.auto_fix_enabled)}
-              disabled={!autoFix?.ready || busy === "auto_fix_enabled"}
-              onCheckedChange={(checked) => save("auto_fix_enabled", { auto_fix_enabled: checked })}
-              aria-label={t("alerts.autoFix")}
-            />
-          </div>
+          <SettingRow
+            icon={<Wrench className="size-4" />}
+            label={t("alerts.autoFix")}
+            description={autoFix?.ready ? t("alerts.autoFixHelp") : t("alerts.autoFixBlocked")}
+            control={
+              <Switch
+                checked={Boolean(settings?.auto_fix_enabled)}
+                disabled={!autoFix?.ready || busy === "auto_fix_enabled"}
+                onCheckedChange={(checked) => save("auto_fix_enabled", { auto_fix_enabled: checked })}
+                aria-label={t("alerts.autoFix")}
+              />
+            }
+          />
 
           <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
             <ShieldCheck className="mt-0.5 size-3.5 shrink-0" />
@@ -171,7 +166,7 @@ export function AlertsCard() {
             </div>
           </>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </IntegrationCard>
   );
 }

@@ -46,10 +46,15 @@ export function formatDuration(ms?: number | null, locale: AppLocale = "pt-BR") 
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
-export const SEND_STATE_VARIANTS: Record<SendState, "default" | "secondary" | "success" | "warning" | "destructive" | "outline"> = {
+/**
+ * Three meanings, three colours: brand (yours to act on), success (done),
+ * destructive (broken). Everything else is neutral — a palette where each
+ * colour means something is a palette people can read at a glance.
+ */
+export const SEND_STATE_VARIANTS: Record<SendState, "default" | "secondary" | "success" | "destructive" | "outline"> = {
   available: "default",
   failed: "destructive",
-  in_progress: "warning",
+  in_progress: "default",
   sent_auto: "success",
   sent_manual: "success",
   unsupported: "outline",
@@ -96,7 +101,6 @@ export function sendDisabledReason(record: AgentRecord, t: Translate, locale: Ap
 export function scoreTone(score: number | null) {
   if (score === null) return "text-muted-foreground";
   if (score >= 86) return "text-success";
-  if (score >= 70) return "text-warning";
   return "text-muted-foreground";
 }
 

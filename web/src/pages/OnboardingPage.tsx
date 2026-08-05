@@ -4,6 +4,7 @@ import { OnboardingPipelines } from "@/components/OnboardingPipelines";
 import { useProfile } from "@/lib/profile-store";
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
+import { BrandMark } from "@/components/BrandMark";
 
 type Step = "profile" | "pipelines";
 
@@ -29,9 +30,7 @@ export function OnboardingPage() {
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-4xl px-6 py-10">
         <header className="mb-8 flex items-start gap-4">
-          <div className="grid size-11 shrink-0 place-items-center rounded-xl bg-primary text-sm font-bold text-primary-foreground">
-            in
-          </div>
+          <BrandMark className="h-12 w-auto max-w-[200px] shrink-0" title="Hirable" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <h1 className="text-2xl font-semibold tracking-tight">
@@ -64,7 +63,7 @@ export function OnboardingPage() {
                       className={cn(
                         "grid size-5 place-items-center rounded-full border text-[11px] font-semibold",
                         active
-                          ? "border-primary bg-primary text-primary-foreground"
+                          ? "border-transparent bg-brand text-white"
                           : done
                             ? "border-success bg-success/15 text-success"
                             : "border-border text-muted-foreground"

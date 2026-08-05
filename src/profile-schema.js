@@ -390,43 +390,6 @@ export function profileCompleteness(profile) {
   return { complete: missing.length === 0, missing };
 }
 
-/**
- * Merges the database profile over the file-based `profile.json`, so existing
- * installs keep working and the interface becomes the authoritative editor.
- */
-export function mergeProfiles(fileProfile = {}, dbProfile = null) {
-  if (!dbProfile) return fileProfile;
-  const merged = { ...fileProfile };
-  for (const section of PROFILE_SECTIONS) {
-    if (FLAT_SECTIONS.includes(section.key)) {
-      merged[section.key] = { ...(fileProfile?.[section.key] || {}) };
-      for (const field of section.fields) {
-        const value = dbProfile?.[section.key]?.[field.key];
-        if (!isEmptyValue(value)) merged[section.key][field.key] = value;
-      }
-      if (section.key === "demographics") {
-        const keywords = dbProfile?.demographics?.option_keywords;
-        if (keywords && Object.values(keywords).some((list) => (list || []).length)) {
-          merged.demographics.option_keywords = keywords;
-        }
-      }
-    } else {
-      for (const field of section.fields) {
-        const value = dbProfile?.[field.key];
-        if (!isEmptyValue(value)) merged[field.key] = value;
-      }
-    }
-  }
-  return merged;
-}
-
-function isEmptyValue(value) {
-  if (value === null || value === undefined || value === "") return true;
-  if (Array.isArray(value)) return value.length === 0;
-  if (typeof value === "object") return Object.keys(value).length === 0;
-  return false;
-}
-
 /** Compact, model-facing view of the trusted profile. */
 export function profileFactsForModel(profile, resumeText = "") {
   return {

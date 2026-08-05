@@ -156,7 +156,7 @@ export function ResumeUploads({ resumes, onChange }: { resumes: ResumeDocument[]
                         {t("resume.analyzed")}
                       </Badge>
                     ) : resume.index_error ? (
-                      <Badge variant="warning">{t("resume.noAnalysis")}</Badge>
+                      <Badge variant="secondary">{t("resume.noAnalysis")}</Badge>
                     ) : (
                       <Badge variant="secondary" className="gap-1">
                         <Loader2 className="size-3 animate-spin" />
@@ -181,7 +181,7 @@ export function ResumeUploads({ resumes, onChange }: { resumes: ResumeDocument[]
                     </div>
                   ) : null}
 
-                  {resume.index_error ? <p className="mt-1 text-xs text-warning">{resume.index_error}</p> : null}
+                  {resume.index_error ? <p className="mt-1 text-xs text-muted-foreground">{resume.index_error}</p> : null}
                 </div>
 
                 <div className="flex items-center gap-1">

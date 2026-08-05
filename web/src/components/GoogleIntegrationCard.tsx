@@ -14,10 +14,8 @@ import { ApiError, api, type IntegrationsPayload } from "@/lib/api";
 import { useCooldown } from "@/hooks/useCooldown";
 import { usePolling } from "@/hooks/usePolling";
 import { formatFullDateTime } from "@/lib/format";
-import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { IntegrationCard, SettingRow, StatusPill, StepHeader } from "@/components/ui/integration";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -157,24 +155,19 @@ export function GoogleIntegrationCard() {
   const missingScopes = (data?.required_scopes ?? []).filter((scope) => !(google?.scopes ?? []).includes(scope));
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex flex-wrap items-center gap-2">
-          <Plug className="size-4" />
-          {c.title}
-          {google?.connected ? (
-            <Badge variant="success">{c.connected}</Badge>
-          ) : (
-            <Badge variant="outline">{c.disconnected}</Badge>
-          )}
-          {delivery?.enabled ? <Badge variant="success">{c.deliveryOn}</Badge> : <Badge variant="secondary">{c.deliveryOff}</Badge>}
-        </CardTitle>
-        <CardDescription>
-          {c.description}
-        </CardDescription>
-      </CardHeader>
-
-      <CardContent className="space-y-6">
+    <IntegrationCard
+      icon={<Mail className="size-4" />}
+      title={c.title}
+      description={c.description}
+      attention={!google?.connected}
+      status={
+        <>
+          <StatusPill tone={google?.connected ? "ok" : "idle"} label={google?.connected ? c.connected : c.disconnected} />
+          <StatusPill tone={delivery?.enabled ? "ok" : "idle"} label={delivery?.enabled ? c.deliveryOn : c.deliveryOff} />
+        </>
+      }
+    >
+      <div className="space-y-6">
         {/* Step 1 — OAuth client */}
         <section className="space-y-3">
           <StepHeader index={1} label={c.cloudCredential} done={Boolean(google?.client_configured)} />
@@ -207,8 +200,11 @@ export function GoogleIntegrationCard() {
             </p>
           </details>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="oauth-client">{c.oauthJson}</Label>
+          {/* Once the client is stored this field is a large empty box that has
+              already served its purpose, so it folds away and stays reachable. */}
+          <details className="space-y-1.5" open={!google?.client_configured}>
+            <summary className="cursor-pointer text-sm font-medium">{c.oauthJson}</summary>
+            <Label htmlFor="oauth-client" className="sr-only">{c.oauthJson}</Label>
             <Textarea
               id="oauth-client"
               value={clientJson}
@@ -231,7 +227,7 @@ export function GoogleIntegrationCard() {
               {busy === "client" ? <Loader2 className="animate-spin" /> : null}
               {c.saveCredential}
             </Button>
-          </div>
+          </details>
         </section>
 
         <Separator />
@@ -247,13 +243,13 @@ export function GoogleIntegrationCard() {
                 <span className="text-muted-foreground">· {c.since} {formatFullDateTime(google.connected_at, locale)}</span>
               </p>
               {!google.has_refresh_token ? (
-                <p className="flex items-center gap-1.5 text-xs text-warning">
+                <p className="flex items-center gap-1.5 text-xs text-destructive">
                   <TriangleAlert className="size-3.5" />
                   {c.noRefresh}
                 </p>
               ) : null}
               {missingScopes.length ? (
-                <p className="flex items-center gap-1.5 text-xs text-warning">
+                <p className="flex items-center gap-1.5 text-xs text-destructive">
                   <TriangleAlert className="size-3.5" />
                   {c.missingScopes} {missingScopes.join(", ")}. {c.reconnectGrant}
                 </p>
@@ -316,19 +312,21 @@ export function GoogleIntegrationCard() {
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label>{c.testDelivery}</Label>
-              <Button
-                variant="outline"
-                size="sm"
-                disabled={!google?.connected || busy === "test" || cooldown.active}
-                onClick={() => run("test", () => api.testGoogleEmail(emailTo), c.testSent)}
-              >
-                {busy === "test" ? <Loader2 className="animate-spin" /> : <Send />}
-                {cooldown.active ? `${c.wait} ${cooldown.remaining}s` : c.sendTest}
-              </Button>
-              <p className="text-xs text-muted-foreground">{c.testWhenOff}</p>
-            </div>
+            <SettingRow
+              label={c.testDelivery}
+              description={c.testWhenOff}
+              control={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!google?.connected || busy === "test" || cooldown.active}
+                  onClick={() => run("test", () => api.testGoogleEmail(emailTo), c.testSent)}
+                >
+                  {busy === "test" ? <Loader2 className="animate-spin" /> : <Send />}
+                  {cooldown.active ? `${c.wait} ${cooldown.remaining}s` : c.sendTest}
+                </Button>
+              }
+            />
           </div>
 
           <div className="space-y-3 rounded-lg border border-border p-3">
@@ -429,24 +427,8 @@ export function GoogleIntegrationCard() {
             {google.last_error}
           </p>
         ) : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-function StepHeader({ index, label, done }: { index: number; label: string; done: boolean }) {
-  return (
-    <div className="flex items-center gap-2">
-      <span
-        className={cn(
-          "grid size-5 place-items-center rounded-full text-xs font-semibold",
-          done ? "bg-success text-success-foreground" : "bg-muted text-muted-foreground"
-        )}
-      >
-        {done ? <CheckCircle2 className="size-3.5" /> : index}
-      </span>
-      <h4 className="text-sm font-semibold">{label}</h4>
-    </div>
+      </div>
+    </IntegrationCard>
   );
 }
 

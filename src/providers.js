@@ -26,8 +26,8 @@ export const PROVIDERS = [
     docs_url: "https://platform.openai.com/api-keys",
     key_hint: "sk-proj-…",
     supports_multiple_keys: true,
-    models: ["gpt-5.2-mini", "gpt-5.2", "gpt-5.1-mini"],
-    default_model: "gpt-5.2-mini"
+    models: ["gpt-5.6-terra", "gpt-5.6-sol", "gpt-5.6-luna"],
+    default_model: "gpt-5.6-terra"
   },
   {
     id: "openrouter",

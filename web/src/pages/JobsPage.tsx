@@ -196,7 +196,7 @@ export function JobsPage({ status }: PageProps) {
                         {record.location ? <span className="line-clamp-1">· {record.location}</span> : null}
                         {record.variant ? <Badge variant="outline">{record.variant}</Badge> : null}
                         {record.risk_flags.slice(0, 2).map((flag) => (
-                          <Badge key={flag} variant="warning" className="gap-1">
+                          <Badge key={flag} variant="destructive" className="gap-1">
                             <ShieldAlert className="size-3" />
                             {flag}
                           </Badge>

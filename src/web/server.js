@@ -12,7 +12,7 @@ import { describeSchedule, isValidCron, nextRunForSchedule } from "../cron.js";
 import { Scheduler } from "../scheduler.js";
 import { nextRunOutsidePause, pauseStatus, validatePauseConfig } from "../pause.js";
 import { PROFILE_SECTIONS, declaredDemographics, normalizeProfile, profileCompleteness } from "../profile-schema.js";
-import { bootstrapDatabasePath, importLegacyConfig, legacyConfigExists, migratePauseConfigV1, migrateProviderRolesV1, resolveConfig } from "../config.js";
+import { bootstrapDatabasePath, migratePauseConfigV1, migrateProviderRolesV1, resolveConfig } from "../config.js";
 import { EDITABLE, coerceEditable, getPath, setPath } from "../config-defaults.js";
 import { extractDocumentText } from "../document-text.js";
 import { PROFILE_GATE_CODE, profileGateState, resetProfileGateCache } from "../profile-gate.js";
@@ -24,7 +24,6 @@ import { LINKEDIN_GATE_CODE, evaluateLinkedInGate } from "../linkedin-gate.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), "..", "..");
-const CONFIG_PATH = path.join(ROOT, "config.json");
 const DIST_DIR = path.join(ROOT, "web", "dist");
 const HOST = process.env.WEB_HOST || "127.0.0.1";
 const PORT = Number(process.env.WEB_PORT || 4321);
@@ -689,9 +688,7 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
         min: field.min,
         max: field.max,
         value: getPath(config, field.path)
-      })),
-      legacy_config_file: legacyConfigExists(),
-      imported_at: store.getSetting("config_imported_at", null)
+      }))
     };
   });
 
@@ -1109,14 +1106,6 @@ async function serveStatic(req, res, pathname) {
 export function startServer({ port = PORT, host = HOST } = {}) {
   const store = new AppStore(bootstrapDatabasePath());
 
-  // Existing installs keep their settings: config.json is copied into the
-  // database once, after which the file is optional.
-  const imported = importLegacyConfig(store);
-  if (imported.imported) {
-    console.log(`[web] config.json importado para o banco (${imported.count} campos)`);
-    for (const problem of imported.skipped) console.warn(`[web] ignorado -> ${problem}`);
-  }
-
   const pauseMigration = migratePauseConfigV1(store);
   if (pauseMigration.migrated) console.log(`[web] pausa global inicializada; ${pauseMigration.cleared_windows} janela(s) legada(s) removida(s)`);
 
@@ -1181,6 +1170,13 @@ export function startServer({ port = PORT, host = HOST } = {}) {
 
   server.listen(port, host, () => {
     console.log(`[web] interface em http://${host}:${port}`);
+    // Serves the console without ever acting: nothing is scheduled, nothing
+    // opens a browser. Used for screenshots and for inspecting a database
+    // safely, where a pipeline firing on its own would be a surprise.
+    if (process.env.AGENT_DISABLE_SCHEDULER === "1") {
+      console.log("[web] scheduler desativado (AGENT_DISABLE_SCHEDULER=1)");
+      return;
+    }
     scheduler.start();
   });
 

@@ -176,7 +176,7 @@ function TristateControl({
             onClick={() => onChange(option.value)}
             className={cn(
               "rounded px-3 py-1 text-sm font-medium transition-colors",
-              active ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+              active ? "bg-brand text-white" : "text-muted-foreground hover:text-foreground"
             )}
           >
             {option.label}

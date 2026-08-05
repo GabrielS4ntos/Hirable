@@ -13,9 +13,10 @@ const ptBR = {
   "nav.settings": "Configurações",
   "nav.keys": "Chaves de API",
   "app.localConsole": "console local",
+  "app.copyright": "© 2026 Hirable · Todos os direitos reservados",
   "app.toggleTheme": "Alternar tema",
-  "app.serverOffline": "servidor offline",
-  "app.schedulerIdle": "scheduler ocioso",
+  "app.serverOffline": "Servidor offline",
+  "app.schedulerIdle": "Scheduler ocioso",
   "app.runningPipeline": "executando {pipeline}",
   "app.loading": "carregando…",
   "app.running": "{pipeline} em execução",
@@ -48,6 +49,8 @@ const ptBR = {
   "alerts.windowHelp": "Uma falha idêntica dentro desse intervalo é contada, mas não vira um novo e-mail. A contagem acompanha o próximo aviso enviado.",
   "alerts.minutes": "{count} min",
   "alerts.everyOne": "Todos",
+  "alerts.autoFixOn": "auto-fix ligado",
+  "alerts.autoFixOff": "auto-fix desligado",
   "alerts.autoFix": "Tentar corrigir automaticamente",
   "alerts.autoFixHelp": "Além do e-mail, a falha é enviada a um agente de CLI que tenta corrigir, roda os testes e reinicia o serviço sozinho.",
   "alerts.autoFixBlocked": "Ative um agente de CLI abaixo para liberar o auto-fix.",
@@ -120,6 +123,10 @@ const ptBR = {
   "pause.summaryAllowed": "Pausa diária das {start} às {end}. Execuções manuais são permitidas durante a pausa.",
   "pause.summaryBlocked": "Pausa diária das {start} às {end}. Execuções manuais ficam bloqueadas durante a pausa.",
   "pause.summaryDisabled": "A pausa global está desativada.",
+  "settings.tabIntegrations": "Integrações",
+  "settings.tabPipelines": "Pipelines",
+  "settings.tabAlerts": "Alertas",
+  "settings.tabGeneral": "Geral",
   "settings.pipelineBehavior": "Comportamento dos pipelines",
   "settings.pipelineBehaviorDescription": "Preferências operacionais persistidas no banco. Limites máximos e regras de segurança continuam protegidos no código.",
   "settings.saved": "Configuração salva",
@@ -136,7 +143,6 @@ const ptBR = {
   "settings.browser": "Navegador",
   "settings.general": "Geral",
   "settings.range": "entre {min} e {max}",
-  "settings.legacy": "Um config.json ainda existe na pasta do projeto. Ele já foi importado{database} e agora é opcional — as alterações feitas aqui têm prioridade sobre ele.",
   "settings.toDatabase": " para o banco",
   "settings.addSearch": "Adicionar busca",
   "settings.removeSearch": "Remover {name}",
@@ -161,6 +167,7 @@ const ptBR = {
   "dashboard.next": "Próxima:",
   "dashboard.lastRun": "Última execução:",
   "dashboard.status": "Status:",
+  "dashboard.statusHeader": "Status",
   "dashboard.runNow": "Executar agora",
   "dashboard.queuedToast": "Execução enfileirada",
   "dashboard.runError": "Não foi possível executar",
@@ -224,7 +231,7 @@ const ptBR = {
   "weekday.4": "Qui",
   "weekday.5": "Sex",
   "weekday.6": "Sáb"
-  ,"onboarding.stepProfile": "Perfil",
+  , "onboarding.stepProfile": "Perfil",
   "onboarding.stepPipelines": "Pipelines",
   "onboarding.pipelinesTitle": "Quando o agente deve agir",
   "onboarding.pipelinesDescription": "Defina o agendamento de cada pipeline e envie os currículos que serão usados nas candidaturas e nos e-mails. Dá para mudar tudo isso depois em Configurações.",
@@ -246,9 +253,9 @@ const ptBR = {
   "profile.sameText": "O texto não mudou desde o último preenchimento.",
   "profile.sameFile": "Este arquivo já foi usado no último preenchimento. Troque o arquivo para preencher de novo.",
   "error.resume_not_readable": "Não foi possível ler o texto deste arquivo. Use .docx, .txt, .md ou .rtf, ou cole o texto.",
-"onboarding.title": "Vamos configurar seu perfil",
+  "onboarding.title": "Vamos configurar seu perfil",
   "onboarding.description": "Os agentes usam estes dados para avaliar vagas, responder mensagens e preencher formulários. Cole o currículo, clique em Preencher e revise o que vier."
-  ,"profile.declared": "Dados declarados",
+  , "profile.declared": "Dados declarados",
   "profile.declaredDescription": "Campos não declarados fazem o agente recusar vagas exclusivas daquele grupo e responder “prefiro não informar” nos formulários.",
   "profile.notDeclared": "não declarado",
   "profile.demographic.pcd": "PCD",
@@ -281,34 +288,35 @@ const ptBR = {
   "profile.finish": "Concluir",
   "profile.saveChanges": "Salvar alterações",
   "profile.unsaved": "Há alterações não salvas."
-  ,"profile.providerTitle": "Provider de modelo"
-  ,"profile.providerDescription": "Onde os agentes rodam. O primeiro configurado vira o principal; o segundo vira o fallback automático quando o principal atinge a cota."
-  ,"profile.providerRequired": "Preencher precisa de um provider de modelo. Configure um acima para liberar o botão."
-  ,"provider.primary": "Principal"
-  ,"provider.fallback": "Fallback"
-  ,"provider.none": "Sem função"
-  ,"provider.activeKeys": "{count} chave(s) ativa(s)"
-  ,"provider.rotation": " · rodízio"
-  ,"provider.noKey": "Ainda sem chave."
-  ,"provider.getKey": "Obter uma"
-  ,"provider.addKey": "Adicionar chave"
-  ,"provider.configure": "Configurar"
-  ,"provider.makePrimary": "Tornar principal"
-  ,"provider.useFallback": "Usar como fallback"
-  ,"provider.roleError": "Não foi possível mudar o papel"
-  ,"provider.secretDescription": "A chave fica no banco local com permissão 600 e nunca é devolvida para a interface."
-  ,"provider.whereKey": "Onde consigo a chave"
-  ,"provider.apiKey": "Chave de API"
-  ,"provider.nickname": "Apelido"
-  ,"provider.multipleKeys": "Este provider aceita várias chaves e as usa em rodízio para ampliar a cota."
-  ,"provider.model": "Modelo"
-  ,"provider.otherModel": "Outro modelo…"
-  ,"provider.modelPlaceholder": "identificador exato do modelo"
-  ,"provider.useAsPrimary": "Usar como provider principal"
-  ,"provider.primaryDescription": "Todas as chamadas vão para ele. Com apenas dois configurados, o provider principal anterior vira fallback."
-  ,"provider.configured": "{provider} configurado"
-  ,"provider.saveError": "Não foi possível salvar"
-  ,"resume.tooLarge": "{name} passa de 10 MB",
+  , "profile.providerTitle": "Provider de modelo"
+  , "profile.providerDescription": "Onde os agentes rodam. O primeiro configurado vira o principal; o segundo vira o fallback automático quando o principal atinge a cota."
+  , "profile.providerRequired": "Preencher precisa de um provider de modelo. Configure um acima para liberar o botão."
+  , "provider.primary": "Principal"
+  , "provider.fallback": "Fallback"
+  , "provider.none": "Sem função"
+  , "provider.activeKeys": "{count} chave(s) ativa(s)"
+  , "provider.rotation": " · rodízio"
+  , "provider.noKey": "Ainda sem chave."
+  , "provider.getKey": "Obter uma"
+  , "provider.addKey": "Adicionar chave"
+  , "provider.configure": "Configurar"
+  , "provider.makePrimary": "Tornar principal"
+  , "provider.currentPrimary": "Principal atual"
+  , "provider.useFallback": "Usar como fallback"
+  , "provider.roleError": "Não foi possível mudar o papel"
+  , "provider.secretDescription": "A chave fica no banco local com permissão 600 e nunca é devolvida para a interface."
+  , "provider.whereKey": "Onde consigo a chave"
+  , "provider.apiKey": "Chave de API"
+  , "provider.nickname": "Apelido"
+  , "provider.multipleKeys": "Este provider aceita várias chaves e as usa em rodízio para ampliar a cota."
+  , "provider.model": "Modelo"
+  , "provider.otherModel": "Outro modelo…"
+  , "provider.modelPlaceholder": "identificador exato do modelo"
+  , "provider.useAsPrimary": "Usar como provider principal"
+  , "provider.primaryDescription": "Todas as chamadas vão para ele. Com apenas dois configurados, o provider principal anterior vira fallback."
+  , "provider.configured": "{provider} configurado"
+  , "provider.saveError": "Não foi possível salvar"
+  , "resume.tooLarge": "{name} passa de 10 MB",
   "resume.uploaded": "{name} enviado",
   "resume.reading": "Lendo o conteúdo para descobrir a que vagas ele serve.",
   "resume.savedWithoutReading": "Guardado, mas sem leitura automática: {reason}",
@@ -345,9 +353,10 @@ const en: Record<MessageKey, string> = {
   "nav.settings": "Settings",
   "nav.keys": "API keys",
   "app.localConsole": "local console",
+  "app.copyright": "© 2026 Hirable · All rights reserved",
   "app.toggleTheme": "Toggle theme",
-  "app.serverOffline": "server offline",
-  "app.schedulerIdle": "scheduler idle",
+  "app.serverOffline": "Server offline",
+  "app.schedulerIdle": "Scheduler idle",
   "app.runningPipeline": "running {pipeline}",
   "app.loading": "loading…",
   "app.running": "{pipeline} running",
@@ -380,6 +389,8 @@ const en: Record<MessageKey, string> = {
   "alerts.windowHelp": "An identical failure inside this window is counted but does not become another email. The count rides along on the next alert that is sent.",
   "alerts.minutes": "{count} min",
   "alerts.everyOne": "Every one",
+  "alerts.autoFixOn": "auto-fix on",
+  "alerts.autoFixOff": "auto-fix off",
   "alerts.autoFix": "Try to fix automatically",
   "alerts.autoFixBlocked": "Enable a CLI agent below to unlock auto-fix.",
   "alerts.autoFixHelp": "Besides the email, the failure is handed to a CLI agent that attempts a fix, runs the tests and restarts the service itself.",
@@ -452,6 +463,10 @@ const en: Record<MessageKey, string> = {
   "pause.summaryAllowed": "Daily pause from {start} to {end}. Manual runs are allowed during the pause.",
   "pause.summaryBlocked": "Daily pause from {start} to {end}. Manual runs are blocked during the pause.",
   "pause.summaryDisabled": "The global pause is disabled.",
+  "settings.tabIntegrations": "Integrations",
+  "settings.tabPipelines": "Pipelines",
+  "settings.tabAlerts": "Alerts",
+  "settings.tabGeneral": "General",
   "settings.pipelineBehavior": "Pipeline behavior",
   "settings.pipelineBehaviorDescription": "Operational preferences stored in the database. Maximum limits and safety rules remain protected in code.",
   "settings.saved": "Settings saved",
@@ -468,7 +483,6 @@ const en: Record<MessageKey, string> = {
   "settings.browser": "Browser",
   "settings.general": "General",
   "settings.range": "between {min} and {max}",
-  "settings.legacy": "A config.json file still exists in the project folder. It has already been imported{database} and is now optional — changes made here take priority.",
   "settings.toDatabase": " into the database",
   "settings.addSearch": "Add search",
   "settings.removeSearch": "Remove {name}",
@@ -493,6 +507,7 @@ const en: Record<MessageKey, string> = {
   "dashboard.next": "Next:",
   "dashboard.lastRun": "Last run:",
   "dashboard.status": "Status:",
+  "dashboard.statusHeader": "Status",
   "dashboard.runNow": "Run now",
   "dashboard.queuedToast": "Run queued",
   "dashboard.runError": "Could not run",
@@ -556,7 +571,7 @@ const en: Record<MessageKey, string> = {
   "weekday.4": "Thu",
   "weekday.5": "Fri",
   "weekday.6": "Sat"
-  ,"onboarding.stepProfile": "Profile",
+  , "onboarding.stepProfile": "Profile",
   "onboarding.stepPipelines": "Pipelines",
   "onboarding.pipelinesTitle": "When the agent should act",
   "onboarding.pipelinesDescription": "Set each pipeline's schedule and upload the résumés used in applications and emails. All of it stays editable in Settings.",
@@ -578,9 +593,9 @@ const en: Record<MessageKey, string> = {
   "profile.sameText": "The text has not changed since the last fill.",
   "profile.sameFile": "This file was already used in the last fill. Replace it to fill again.",
   "error.resume_not_readable": "The text of this file could not be read. Use .docx, .txt, .md or .rtf, or paste the text.",
-"onboarding.title": "Let's set up your profile",
+  "onboarding.title": "Let's set up your profile",
   "onboarding.description": "Agents use this information to evaluate jobs, reply to messages, and fill out forms. Paste your résumé, click Fill in, and review the result."
-  ,"profile.declared": "Declared information",
+  , "profile.declared": "Declared information",
   "profile.declaredDescription": "When a field is not declared, the agent rejects jobs restricted to that group and answers “prefer not to say” in forms.",
   "profile.notDeclared": "not declared",
   "profile.demographic.pcd": "Disability",
@@ -613,34 +628,35 @@ const en: Record<MessageKey, string> = {
   "profile.finish": "Finish",
   "profile.saveChanges": "Save changes",
   "profile.unsaved": "There are unsaved changes."
-  ,"profile.providerTitle": "Model provider"
-  ,"profile.providerDescription": "Where agents run. The first configured provider becomes primary; the second becomes the automatic fallback when the primary reaches its quota."
-  ,"profile.providerRequired": "Fill in requires a model provider. Configure one above to enable the button."
-  ,"provider.primary": "Primary"
-  ,"provider.fallback": "Fallback"
-  ,"provider.none": "No role"
-  ,"provider.activeKeys": "{count} active key(s)"
-  ,"provider.rotation": " · round-robin"
-  ,"provider.noKey": "No key configured yet."
-  ,"provider.getKey": "Get one"
-  ,"provider.addKey": "Add key"
-  ,"provider.configure": "Configure"
-  ,"provider.makePrimary": "Make primary"
-  ,"provider.useFallback": "Use as fallback"
-  ,"provider.roleError": "Could not change the role"
-  ,"provider.secretDescription": "The key stays in the local database with 600 permissions and is never returned to the interface."
-  ,"provider.whereKey": "Where to get a key"
-  ,"provider.apiKey": "API key"
-  ,"provider.nickname": "Nickname"
-  ,"provider.multipleKeys": "This provider accepts multiple keys and rotates through them to extend the quota."
-  ,"provider.model": "Model"
-  ,"provider.otherModel": "Other model…"
-  ,"provider.modelPlaceholder": "exact model identifier"
-  ,"provider.useAsPrimary": "Use as primary provider"
-  ,"provider.primaryDescription": "All calls go to it. With only two configured providers, the previous primary becomes the fallback."
-  ,"provider.configured": "{provider} configured"
-  ,"provider.saveError": "Could not save"
-  ,"resume.tooLarge": "{name} is larger than 10 MB",
+  , "profile.providerTitle": "Model provider"
+  , "profile.providerDescription": "Where agents run. The first configured provider becomes primary; the second becomes the automatic fallback when the primary reaches its quota."
+  , "profile.providerRequired": "Fill in requires a model provider. Configure one above to enable the button."
+  , "provider.primary": "Primary"
+  , "provider.fallback": "Fallback"
+  , "provider.none": "No role"
+  , "provider.activeKeys": "{count} active key(s)"
+  , "provider.rotation": " · round-robin"
+  , "provider.noKey": "No key configured yet."
+  , "provider.getKey": "Get one"
+  , "provider.addKey": "Add key"
+  , "provider.configure": "Configure"
+  , "provider.makePrimary": "Make primary"
+  , "provider.currentPrimary": "Current primary"
+  , "provider.useFallback": "Use as fallback"
+  , "provider.roleError": "Could not change the role"
+  , "provider.secretDescription": "The key stays in the local database with 600 permissions and is never returned to the interface."
+  , "provider.whereKey": "Where to get a key"
+  , "provider.apiKey": "API key"
+  , "provider.nickname": "Nickname"
+  , "provider.multipleKeys": "This provider accepts multiple keys and rotates through them to extend the quota."
+  , "provider.model": "Model"
+  , "provider.otherModel": "Other model…"
+  , "provider.modelPlaceholder": "exact model identifier"
+  , "provider.useAsPrimary": "Use as primary provider"
+  , "provider.primaryDescription": "All calls go to it. With only two configured providers, the previous primary becomes the fallback."
+  , "provider.configured": "{provider} configured"
+  , "provider.saveError": "Could not save"
+  , "resume.tooLarge": "{name} is larger than 10 MB",
   "resume.uploaded": "{name} uploaded",
   "resume.reading": "Reading the content to determine which jobs it fits.",
   "resume.savedWithoutReading": "Saved, but not read automatically: {reason}",

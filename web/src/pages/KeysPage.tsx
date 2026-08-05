@@ -21,19 +21,19 @@ export function KeysPage({ refreshStatus }: PageProps) {
   const { t, locale } = useI18n();
   const c = locale === "en" ? {
     providers: "Model providers", providersHelp: "The primary receives all calls; the fallback takes over on quota failures. With two configured providers, choosing the primary automatically defines the other as fallback.",
-    newKey: "New key", newKeyHelp: "Keys are stored in local SQLite (file permission 600) and take priority over environment secrets. Gemini keys use round-robin; OpenRouter is the fallback when all Gemini keys hit quota limits.",
+    newKey: "New key", newKeyHelp: "Keys are stored only in local SQLite (file permission 600). Providers with multiple keys use round-robin rotation.",
     provider: "Provider", nickname: "Nickname", nicknamePlaceholder: "personal account", key: "Key", add: "Add",
     saved: "Key saved", savedHelp: "Pipelines will use this key on their next run.", saveError: "Could not save key",
     active: "active", primary: "primary", fallback: "fallback", disabled: "Key disabled", enabled: "Key enabled", removed: "Key removed",
-    empty: "No keys registered. The agent falls back to environment variables in", uses: "Uses", lastUse: "Last use", activeHeading: "Active",
+    empty: "No keys registered. Add one here to configure this provider.", uses: "Uses", lastUse: "Last use", activeHeading: "Active",
     error: "error", enableKey: "Enable key", removeKey: "Remove key"
   } : {
     providers: "Providers de modelo", providersHelp: "O principal recebe todas as chamadas; o fallback assume quando ele falha por cota. Com dois providers configurados, escolher o principal define o outro como fallback automaticamente.",
-    newKey: "Nova chave", newKeyHelp: "As chaves ficam no SQLite local (arquivo com permissão 600) e têm prioridade sobre os segredos do ambiente. Chaves Gemini usam rodízio; a OpenRouter é o fallback quando todas as Gemini atingem a cota.",
+    newKey: "Nova chave", newKeyHelp: "As chaves ficam somente no SQLite local (arquivo com permissão 600). Providers com várias chaves usam rodízio.",
     provider: "Provedor", nickname: "Apelido", nicknamePlaceholder: "conta pessoal", key: "Chave", add: "Adicionar",
     saved: "Chave salva", savedHelp: "Os pipelines já usam esta chave na próxima execução.", saveError: "Erro ao salvar chave",
     active: "ativa(s)", primary: "principal", fallback: "fallback", disabled: "Chave desativada", enabled: "Chave ativada", removed: "Chave removida",
-    empty: "Nenhuma chave cadastrada. O agente usa as variáveis de ambiente em", uses: "Usos", lastUse: "Último uso", activeHeading: "Ativa",
+    empty: "Nenhuma chave cadastrada. Adicione uma aqui para configurar este provider.", uses: "Usos", lastUse: "Último uso", activeHeading: "Ativa",
     error: "erro", enableKey: "Ativar chave", removeKey: "Remover chave"
   };
   const keys = usePolling(api.listKeys, 0);
@@ -94,9 +94,7 @@ export function KeysPage({ refreshStatus }: PageProps) {
             <Plus className="size-4" />
             {c.newKey}
           </CardTitle>
-          <CardDescription>
-            {c.newKeyHelp} <code className="font-mono text-xs">secrets/.env</code>.
-          </CardDescription>
+          <CardDescription>{c.newKeyHelp}</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={addKey} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-[10rem_1fr_2fr_auto]">
@@ -197,10 +195,7 @@ function KeyTable({
       </CardHeader>
       <CardContent>
         {items.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">
-            {copy.empty}{" "}
-            <code className="font-mono text-xs">secrets/.env</code>.
-          </p>
+          <p className="py-6 text-center text-sm text-muted-foreground">{copy.empty}</p>
         ) : (
           <Table>
             <TableHeader>

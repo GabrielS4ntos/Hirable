@@ -14,6 +14,7 @@ import { KeysPage } from "@/pages/KeysPage";
 import { ProfilePage } from "@/pages/ProfilePage";
 import { OnboardingPage } from "@/pages/OnboardingPage";
 import { LanguageProvider, pipelineLabel, useI18n } from "@/lib/i18n";
+import { BrandLockup } from "@/components/BrandMark";
 
 const NAV = [
   { id: "painel", labelKey: "nav.dashboard", icon: Activity, Component: DashboardPage },
@@ -33,7 +34,12 @@ function useHashRoute(): [RouteId, (id: RouteId) => void] {
   const [route, setRoute] = React.useState<RouteId>(read);
 
   React.useEffect(() => {
-    const onChange = () => setRoute(read());
+    const onChange = () => {
+      setRoute(read());
+      // A hash change keeps the previous scroll position, so a short page opened
+      // halfway down after coming from a long one.
+      window.scrollTo({ top: 0 });
+    };
     window.addEventListener("hashchange", onChange);
     return () => window.removeEventListener("hashchange", onChange);
   }, []);
@@ -95,15 +101,7 @@ function AppShell() {
         <div className="flex min-h-screen flex-col bg-background lg:flex-row">
           <aside className="flex shrink-0 flex-col gap-6 border-b border-border bg-card/40 px-4 py-5 lg:w-64 lg:border-r lg:border-b-0">
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2.5">
-                <div className="grid size-9 place-items-center rounded-lg bg-primary text-sm font-bold text-primary-foreground">
-                  in
-                </div>
-                <div className="leading-tight">
-                  <p className="text-sm font-semibold">LinkedIn Agent</p>
-                  <p className="text-xs text-muted-foreground">{t("app.localConsole")}</p>
-                </div>
-              </div>
+              <BrandLockup markClassName="size-9" subtitle={t("app.localConsole")} />
               <button
                 onClick={toggle}
                 aria-label={t("app.toggleTheme")}
@@ -140,7 +138,7 @@ function AppShell() {
                 <span
                   className={cn(
                     "size-2 rounded-full",
-                    status.error ? "bg-destructive" : running ? "animate-pulse bg-warning" : "bg-success"
+                    status.error ? "bg-destructive" : running ? "animate-pulse bg-primary" : "bg-success"
                   )}
                 />
                 {status.error
@@ -159,6 +157,7 @@ function AppShell() {
                 {status.data?.linkedin_gate?.ready ? t("linkedin.connectedShort") : t("linkedin.disconnectedShort")}
               </div>
               {status.data ? <p className="font-mono">{status.data.timezone}</p> : null}
+              <p className="pt-1 text-[11px] text-muted-foreground/70">{t("app.copyright")}</p>
             </div>
           </aside>
 
@@ -185,7 +184,7 @@ function AppShell() {
                       onClick={() => setLocale(option)}
                       className={cn(
                         "rounded px-2 py-1 text-xs font-medium transition-colors",
-                        locale === option ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                        locale === option ? "bg-brand text-white" : "text-muted-foreground hover:text-foreground"
                       )}
                     >
                       {option === "pt-BR" ? "PT" : "EN"}
@@ -193,7 +192,7 @@ function AppShell() {
                   ))}
                 </div>
                 {running ? (
-                  <Badge variant="warning" className="gap-1.5">
+                  <Badge variant="default" className="gap-1.5">
                     <span className="size-1.5 animate-pulse rounded-full bg-current" />
                     {t("app.running", { pipeline: pipelineLabel(running.pipeline, running.pipeline, locale) })}
                   </Badge>

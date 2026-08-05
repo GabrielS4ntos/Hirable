@@ -6,7 +6,6 @@ import {
   declaredDemographics,
   deriveDemographicKeywords,
   emptyProfile,
-  mergeProfiles,
   normalizeProfile,
   profileCompleteness,
   profileFactsForModel
@@ -110,30 +109,6 @@ test("completeness only requires the fields marked as required", () => {
   assert.deepEqual(profileCompleteness(emptyProfile()).missing, required);
   const filled = normalizeProfile({ identity: { full_name: "Ana", email: "a@x.com" } });
   assert.equal(profileCompleteness(filled).complete, true);
-});
-
-test("the database profile wins over profile.json but never erases it", () => {
-  const file = {
-    identity: { full_name: "Nome do arquivo", city: "Brasilia", postal_code: "01310100" },
-    professional: { facts: ["fato antigo"], english_level: "B1" },
-    custom_key: "preservado"
-  };
-  const db = normalizeProfile({
-    identity: { full_name: "Nome do banco" },
-    professional: { english_level: "C1" }
-  });
-  const merged = mergeProfiles(file, db);
-  assert.equal(merged.identity.full_name, "Nome do banco");
-  assert.equal(merged.identity.city, "Brasilia");
-  assert.equal(merged.identity.postal_code, "01310100");
-  assert.equal(merged.professional.english_level, "C1");
-  assert.deepEqual(merged.professional.facts, ["fato antigo"]);
-  assert.equal(merged.custom_key, "preservado");
-});
-
-test("merging without a database profile returns the file untouched", () => {
-  const file = { identity: { full_name: "Ana" } };
-  assert.equal(mergeProfiles(file, null), file);
 });
 
 test("the model payload carries the resume and hides undeclared demographics", () => {

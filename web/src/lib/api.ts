@@ -303,8 +303,6 @@ export type ConfigField = {
 
 export type ConfigPayload = {
   fields: ConfigField[];
-  legacy_config_file: boolean;
-  imported_at: string | null;
 };
 
 export type ResumeDocument = {

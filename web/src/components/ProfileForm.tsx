@@ -247,8 +247,8 @@ export function ProfileForm({ mode, onSaved }: { mode: "onboarding" | "profile";
           </div>
 
           {warnings.length ? (
-            <div className="rounded-md border border-warning/40 bg-warning/5 p-3">
-              <p className="flex items-center gap-1.5 text-sm font-medium text-warning">
+            <div className="rounded-md border border-primary/40 bg-primary/5 p-3">
+              <p className="flex items-center gap-1.5 text-sm font-medium text-primary">
                 <TriangleAlert className="size-4" />
                 {t("profile.incompleteResume")}
               </p>
