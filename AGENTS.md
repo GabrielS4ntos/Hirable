@@ -99,6 +99,15 @@ single Chromium profile (`.browser-profile`). `network` and `dm` are paired five
 when both are on the same `daily_times` cycle; pairing is an optimization, and any other valid
 combination must fall back to independent scheduling rather than reporting an error.
 
+**Onboarding** is two steps (`OnboardingPage`): the profile form, then pipelines. The
+completion flag is no longer flipped by saving the profile — `POST /api/profile/complete-onboarding`
+does it, so the first run always passes through scheduling. On step 1 the résumé is given
+*either* as text or as a file, never both (`ResumeSourcePicker`), and one fill button reads
+from whichever is active. `extraction-source.js` hashes what the extraction last read and the
+server stores it in `app_settings`; the button re-arms only when that changes, since a repeat
+run costs a model call and returns identical fields. `web/src/lib/hash.ts` mirrors the same
+normalization client-side so both sides compare the same value.
+
 **Résumés.** `resume-gate.js` blocks Easy Apply and the digest email when no document is
 stored; scanning stays allowed because it sends nothing. `resume-selection.js` holds the
 résumé step of the form and is separate from `cli.js` precisely so the decision flow — expand,

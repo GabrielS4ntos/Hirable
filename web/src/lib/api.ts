@@ -131,9 +131,18 @@ export type DeclaredDemographics = {
   orientacao_sexual: string;
 };
 
+/** What the extraction agent last read, so the button knows when to re-enable. */
+export type LastExtraction = {
+  source: "text" | "file";
+  hash: string;
+  resume_id: string | null;
+  at: string;
+};
+
 export type ProfilePayload = {
   resume_text: string;
   profile: Record<string, any>;
+  last_extraction: LastExtraction | null;
   onboarding_complete: boolean;
   onboarding_completed_at: string | null;
   updated_at: string | null;
@@ -357,14 +366,22 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input)
     }),
-  extractProfile: (resumeText: string) =>
+  /** Fills the profile from pasted text or from an uploaded file, never both. */
+  extractProfile: (source: { resume_text: string } | { resume_id: string }) =>
     request<{
       profile: Record<string, any>;
+      resume_text?: string;
       warnings: string[];
       declared_demographics: DeclaredDemographics;
       completeness: { complete: boolean; missing: string[] };
-    }>("/api/profile/extract", { method: "POST", body: JSON.stringify({ resume_text: resumeText }) }),
+      last_extraction: LastExtraction;
+    }>("/api/profile/extract", { method: "POST", body: JSON.stringify(source) }),
   resetOnboarding: () => request<{ onboarding_complete: boolean }>("/api/profile/reset-onboarding", { method: "POST" }),
+  completeOnboarding: () =>
+    request<{ onboarding_complete: boolean; completeness: { complete: boolean; missing: string[] } }>(
+      "/api/profile/complete-onboarding",
+      { method: "POST" }
+    ),
 
   listResumes: () => request<{ items: ResumeDocument[] }>("/api/resumes"),
   uploadResume: (input: { filename: string; label?: string; mime_type?: string; content_base64: string }) =>

@@ -12,6 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/components/ui/toast";
 import { ProfileSectionFields } from "@/components/ProfileFields";
 import { ResumeUploads } from "@/components/ResumeUploads";
+import { ResumeSourcePicker, type ResumeSource } from "@/components/ResumeSourcePicker";
+import { sha256Hex } from "@/lib/hash";
 import { ProviderCards } from "@/components/ProviderCards";
 import { localizedError, profileMetadata, useI18n, type Translate } from "@/lib/i18n";
 
@@ -30,7 +32,7 @@ const DEMOGRAPHIC_KEYS: Record<string, Parameters<Translate>[0]> = {
  * fill the fields, edit whatever is wrong, then save. Filling never writes —
  * only Salvar does.
  */
-export function ProfileForm({ mode }: { mode: "onboarding" | "profile" }) {
+export function ProfileForm({ mode, onSaved }: { mode: "onboarding" | "profile"; onSaved?: () => void }) {
   const toast = useToast();
   const { t, locale } = useI18n();
   const { data, loading, refresh, setData } = useProfile();
@@ -46,6 +48,8 @@ export function ProfileForm({ mode }: { mode: "onboarding" | "profile" }) {
   const [filledFields, setFilledFields] = React.useState<string[]>([]);
   const [missing, setMissing] = React.useState<string[]>([]);
   const [baseline, setBaseline] = React.useState("");
+  const [source, setSource] = React.useState<ResumeSource>("text");
+  const [textHash, setTextHash] = React.useState("");
 
   React.useEffect(() => {
     if (!data) return;
@@ -59,21 +63,47 @@ export function ProfileForm({ mode }: { mode: "onboarding" | "profile" }) {
     api.listProviders().then((result) => setProviders(result.items)).catch(() => {});
   }, []);
 
+  // Hashing here mirrors what the server records after a run, so "changed since
+  // last time" is decided by the same value on both sides.
+  React.useEffect(() => {
+    let active = true;
+    sha256Hex(resumeText).then((hash) => { if (active) setTextHash(hash); });
+    return () => { active = false; };
+  }, [resumeText]);
+
   const sections = data?.sections ?? [];
   const hasProvider = providers.some((provider) => provider.role === "primary");
-  const canExtract = resumeText.trim().length >= MIN_RESUME_CHARS && hasProvider;
-  const dirty = baseline !== "" && JSON.stringify({ profile, resume_text: resumeText }) !== baseline;
   const isOnboarding = mode === "onboarding";
+  const dirty = baseline !== "" && JSON.stringify({ profile, resume_text: resumeText }) !== baseline;
+
+  // Onboarding keeps exactly one file, so it is always the one to read from.
+  const onboardingResume = resumes[0] ?? null;
+  const lastExtraction = data?.last_extraction ?? null;
+
+  // Re-running over the same résumé costs a model call and returns the same
+  // fields, so the button waits for the source to actually change.
+  const sourceReady = source === "text" ? resumeText.trim().length >= MIN_RESUME_CHARS : Boolean(onboardingResume);
+  const sourceChanged =
+    source === "text"
+      ? !lastExtraction || lastExtraction.hash !== textHash
+      : !lastExtraction || lastExtraction.source !== "file" || lastExtraction.resume_id !== onboardingResume?.id;
+  const canExtract = sourceReady && hasProvider && sourceChanged;
 
   async function fillFromResume() {
     setExtracting(true);
     try {
-      const result = await api.extractProfile(resumeText);
+      const result = await api.extractProfile(
+        source === "file" && onboardingResume ? { resume_id: onboardingResume.id } : { resume_text: resumeText }
+      );
       // Fields are replaced in place: the user reviews and edits before saving.
       setProfile(result.profile);
+      // Text read out of the file is kept so the agents get the same résumé the
+      // extraction saw, even when the source was an upload.
+      if (result.resume_text) setResumeText(result.resume_text);
       setWarnings(result.warnings || []);
       setFilledFields(collectFilledPaths(result.profile, sections));
       setMissing(result.completeness?.missing || []);
+      if (result.last_extraction) setData({ ...(data as any), last_extraction: result.last_extraction });
       toast({
         title: t("profile.filled"),
         description: t("profile.filledDescription"),
@@ -90,10 +120,12 @@ export function ProfileForm({ mode }: { mode: "onboarding" | "profile" }) {
   async function save() {
     setSaving(true);
     try {
+      // Onboarding no longer finishes here: the flag is flipped by the pipeline
+      // step, so the first run always passes through scheduling.
       const result = await api.saveProfile({
         profile,
         resume_text: resumeText,
-        complete_onboarding: isOnboarding
+        complete_onboarding: false
       });
       setMissing(result.completeness.missing);
 
@@ -102,7 +134,7 @@ export function ProfileForm({ mode }: { mode: "onboarding" | "profile" }) {
       setBaseline(JSON.stringify({ profile: result.profile, resume_text: resumeText }));
 
       if (isOnboarding && !result.completeness.complete) {
-        // The data was persisted; only the completion flag was withheld.
+        // The data was persisted; only the advance is withheld.
         toast({
           title: t("profile.savedIncomplete"),
           description: t("profile.completeFields", { fields: result.completeness.missing.join(", ") }),
@@ -114,6 +146,7 @@ export function ProfileForm({ mode }: { mode: "onboarding" | "profile" }) {
           description: t("profile.agentsUseData"),
           variant: "success"
         });
+        if (isOnboarding) onSaved?.();
       }
     } catch (error) {
       toast({ title: t("profile.saveError"), description: localizedError(error, t, locale), variant: "error" });
@@ -167,30 +200,45 @@ export function ProfileForm({ mode }: { mode: "onboarding" | "profile" }) {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="resume-text">{t("profile.resumeText")}</Label>
-            <Textarea
-              id="resume-text"
-              value={resumeText}
-              onChange={(event) => setResumeText(event.target.value)}
-              placeholder={t("profile.resumePlaceholder")}
-              className="min-h-56 font-mono text-xs leading-relaxed"
-              spellCheck={false}
+          {isOnboarding ? (
+            <ResumeSourcePicker
+              source={source}
+              onSourceChange={setSource}
+              resumeText={resumeText}
+              onResumeTextChange={setResumeText}
+              resume={onboardingResume}
+              onResumeChange={setResumes}
+              minChars={MIN_RESUME_CHARS}
             />
-            <p className="text-xs text-muted-foreground">
-              {t("profile.characters", { count: resumeText.trim().length })}
-              {canExtract ? "" : t("profile.minimum", { count: MIN_RESUME_CHARS })}
-            </p>
-          </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label htmlFor="resume-text">{t("profile.resumeText")}</Label>
+              <Textarea
+                id="resume-text"
+                value={resumeText}
+                onChange={(event) => setResumeText(event.target.value)}
+                placeholder={t("profile.resumePlaceholder")}
+                className="min-h-56 font-mono text-xs leading-relaxed"
+                spellCheck={false}
+              />
+              <p className="text-xs text-muted-foreground">
+                {t("profile.characters", { count: resumeText.trim().length })}
+                {sourceReady ? "" : t("profile.minimum", { count: MIN_RESUME_CHARS })}
+              </p>
+            </div>
+          )}
 
           <div className="space-y-2">
+            {/* One button for both sources: what changes is where it reads from. */}
             <Button onClick={fillFromResume} disabled={!canExtract || extracting || cooldown.active}>
               {extracting ? <Loader2 className="animate-spin" /> : <Sparkles />}
               {cooldown.active ? t("profile.wait", { seconds: cooldown.remaining }) : t("profile.fill")}
             </Button>
             {!hasProvider ? (
+              <p className="text-xs text-muted-foreground">{t("profile.providerRequired")}</p>
+            ) : sourceReady && !sourceChanged ? (
               <p className="text-xs text-muted-foreground">
-                {t("profile.providerRequired")}
+                {source === "file" ? t("profile.sameFile") : t("profile.sameText")}
               </p>
             ) : null}
           </div>
@@ -211,17 +259,19 @@ export function ProfileForm({ mode }: { mode: "onboarding" | "profile" }) {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("profile.resumeFiles")}</CardTitle>
-          <CardDescription>
-            {t("profile.resumeFilesDescription")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <ResumeUploads resumes={resumes} onChange={setResumes} />
-        </CardContent>
-      </Card>
+      {!isOnboarding ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>{t("profile.resumeFiles")}</CardTitle>
+            <CardDescription>
+              {t("profile.resumeFilesDescription")}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ResumeUploads resumes={resumes} onChange={setResumes} />
+          </CardContent>
+        </Card>
+      ) : null}
 
       {sections.map((section) => (
         <Card key={section.key} className={cn(section.sensitive && "border-primary/40")}>
@@ -247,7 +297,7 @@ export function ProfileForm({ mode }: { mode: "onboarding" | "profile" }) {
       <div className="sticky bottom-0 -mx-6 flex items-center gap-3 border-t border-border bg-background/90 px-6 py-3 backdrop-blur">
         <Button onClick={save} disabled={saving || (!isOnboarding && !dirty)}>
           {saving ? <Loader2 className="animate-spin" /> : isOnboarding ? <Check /> : <Save />}
-          {isOnboarding ? t("profile.finish") : t("profile.saveChanges")}
+          {isOnboarding ? t("profile.continue") : t("profile.saveChanges")}
         </Button>
         {dirty ? <span className="text-xs text-muted-foreground">{t("profile.unsaved")}</span> : null}
       </div>

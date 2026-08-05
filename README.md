@@ -109,22 +109,33 @@ replace `__PROJECT_DIR__` with the absolute path, and `launchctl bootstrap gui/$
 
 There are no files to edit. The console walks you through it:
 
-1. **Onboarding.** Paste your résumé and press **Preencher**. An agent extracts your
-   profile — contact details, target roles, years per technology, experience, education —
-   using the provider's structured-output mode, and fills the form for review. Nothing is
-   saved until you confirm, and sensitive fields stay blank unless the résumé states them
-   explicitly. The onboarding and the profile screen are the same form, so nothing you
-   learn here has to be relearned later.
-2. **Model provider.** Configure Gemini, OpenAI or OpenRouter right on the onboarding
+1. **Onboarding, step 1 — profile.** Give your résumé either way: paste the text or upload
+   the file. The two are alternatives, so only one is on screen at a time, and the same
+   **Preencher** button reads from whichever you chose. An agent extracts your profile —
+   contact details, target roles, years per technology, experience, education — using the
+   provider's structured-output mode, and fills the form for review. Nothing is saved until
+   you confirm, and sensitive fields stay blank unless the résumé states them explicitly.
+   The button re-arms only when the source changes: editing the text, or replacing the file
+   through **Trocar arquivo**. Re-running over the same résumé costs a model call and returns
+   the same fields, so it is not offered. The uploaded file is kept and becomes the first
+   résumé the pipelines can use.
+2. **Onboarding, step 2 — pipelines.** The schedules, and the résumé library. This step
+   exists so the first run ends with you having chosen how often something acts on your
+   behalf, rather than discovering it in settings later. Everything here stays editable in
+   *Configurações*.
+
+   The onboarding and the profile screen share the same form, so nothing you learn here has
+   to be relearned later.
+3. **Model provider.** Configure Gemini, OpenAI or OpenRouter right on the onboarding
    screen — the **Preencher** button stays disabled until one is set. The first provider
    becomes the primary; a second becomes its fallback automatically.
-3. **Résumé files.** Upload the documents you want attached to emails and selected in Easy
+4. **Résumé files.** Upload the documents you want attached to emails and selected in Easy
    Apply. Each is summarized once so the agent can pick the right one per job.
-4. **Job searches.** Under *Configurações*, paste the LinkedIn search URLs you want scanned
+5. **Job searches.** Under *Configurações*, paste the LinkedIn search URLs you want scanned
    (open a LinkedIn job search with your filters applied and copy the address bar).
-5. **LinkedIn login.** Run `npm run dm:check:headed` once and log in. The session persists
+6. **LinkedIn login.** Run `npm run dm:check:headed` once and log in. The session persists
    in `.browser-profile`.
-6. **Turn on a schedule.** Pipelines start in *manual*. Switch one to *automatic* when you
+7. **Turn on a schedule.** Pipelines start in *manual*. Switch one to *automatic* when you
    are comfortable with what it is doing.
 
 Optionally, connect Google under *Configurações* to receive alert emails and to have

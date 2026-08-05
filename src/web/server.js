@@ -19,6 +19,7 @@ import { PROFILE_GATE_CODE, profileGateState, resetProfileGateCache } from "../p
 import { assertLaunchAllowed, sandboxEnv } from "../auto-fix-sandbox.js";
 import { detectSupervisor } from "../service-restart.js";
 import { RESUME_GATE_CODE, evaluateResumeGate } from "../resume-gate.js";
+import { extractionChanged, hashResumeFile, hashResumeText } from "../extraction-source.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), "..", "..");
@@ -160,6 +161,8 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
       updated_at: stored.updated_at,
       completeness: profileCompleteness(profile),
       declared_demographics: declaredDemographics(profile),
+      // Lets the interface keep "Preencher" disabled until the source changes.
+      last_extraction: store.getSetting("profile_extract_last", null),
       sections: PROFILE_SECTIONS
     };
   });
@@ -207,7 +210,29 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
    */
   route("POST", /^\/api\/profile\/extract$/, async (req) => {
     const body = await readBody(req, 4_000_000);
-    const resumeText = String(body.resume_text || "").trim();
+
+    // Two sources, one agent: pasted text, or an uploaded file read here so the
+    // document never has to make a round trip through the browser.
+    let resumeText = String(body.resume_text || "").trim();
+    let marker = { source: "text", hash: hashResumeText(resumeText), resume_id: null };
+
+    if (body.resume_id) {
+      const resume = store.getResume(String(body.resume_id));
+      if (!resume) throw new HttpError(404, "currículo não encontrado");
+
+      const content = await fsp.readFile(path.join(resumesDir(), resume.stored_name)).catch(() => null);
+      if (!content) throw new HttpError(410, "o arquivo não está mais no disco");
+
+      const extracted = extractDocumentText(content, resume.original_name);
+      if (!extracted.extracted) {
+        // A PDF is stored and attached fine, but its text cannot be read without
+        // a dependency this project does not carry — say so instead of guessing.
+        throw new HttpError(422, extracted.reason, "resume_not_readable");
+      }
+      resumeText = String(extracted.text || "").trim();
+      marker = { source: "file", hash: hashResumeFile(content), resume_id: resume.id };
+    }
+
     if (resumeText.length < 40) throw new HttpError(400, "Cole o texto do currículo antes de preencher");
 
     const limit = store.consumeRateLimit("profile_extract", { capacity: 3, refillPerSecond: 1 / 30 });
@@ -218,16 +243,46 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
     try {
       const result = await runCliJson("profile:extract", [], { input: resumeText, timeoutMs: 120_000 });
       const profile = normalizeProfile(result?.profile || {});
+      // Recorded only on success: a failed run must not disable the button that
+      // would let the user try again.
+      const lastExtraction = { ...marker, at: new Date().toISOString() };
+      store.setSetting("profile_extract_last", lastExtraction);
+
       return {
         profile,
+        resume_text: marker.source === "file" ? resumeText : undefined,
         warnings: result?.warnings || [],
         declared_demographics: declaredDemographics(profile),
         completeness: profileCompleteness(profile),
+        last_extraction: lastExtraction,
         rate_limit: { remaining: limit.remaining }
       };
     } catch (error) {
       throw new HttpError(502, `Falha ao analisar o currículo: ${error.message}`);
     }
+  });
+
+  /**
+   * Marks the onboarding as done, once the pipeline step has been seen.
+   *
+   * Saving the profile no longer flips this flag: the first-run flow continues
+   * past the profile into scheduling, and only finishing that hands the user to
+   * the full console. The completeness rule still applies — the flag can never
+   * claim more than the data supports.
+   */
+  route("POST", /^\/api\/profile\/complete-onboarding$/, () => {
+    const stored = store.getUserProfile();
+    const profile = normalizeProfile(stored.profile);
+    const completeness = profileCompleteness(profile);
+    if (!completeness.complete) {
+      throw new HttpError(409, "Complete os campos obrigatórios do perfil antes de concluir", "profile_incomplete", {
+        missing: completeness.missing
+      });
+    }
+    store.saveUserProfile({ profile, complete_onboarding: true });
+    resetProfileGateCache();
+    scheduler.refreshAllNextRuns();
+    return { onboarding_complete: true, completeness };
   });
 
   route("POST", /^\/api\/profile\/reset-onboarding$/, () => {
