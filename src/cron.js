@@ -55,7 +55,7 @@ function parseField(rawField, fieldIndex) {
     let step = 1;
     if (stepPart !== undefined) {
       step = Number(stepPart);
-      if (!Number.isInteger(step) || step < 1) throw new CronError(`passo invalido em ${name}: ${part}`);
+      if (!Number.isInteger(step) || step < 1) throw new CronError(`passo inválido em ${name}: ${part}`);
     }
 
     let start;
@@ -73,7 +73,7 @@ function parseField(rawField, fieldIndex) {
     }
 
     if (!Number.isInteger(start) || !Number.isInteger(end)) {
-      throw new CronError(`valor invalido em ${name}: ${part}`);
+      throw new CronError(`valor inválido em ${name}: ${part}`);
     }
     if (start < min || end > max || start > end) {
       throw new CronError(`intervalo fora do limite em ${name} (${min}-${max}): ${part}`);
@@ -87,17 +87,17 @@ function parseField(rawField, fieldIndex) {
     values.add(0);
   }
 
-  if (values.size === 0) throw new CronError(`campo ${name} nao produziu valores`);
+  if (values.size === 0) throw new CronError(`campo ${name} não produziu valores`);
   return values;
 }
 
 export function parseCron(expression) {
   const raw = String(expression || "").trim().toLowerCase();
-  if (!raw) throw new CronError("expressao cron vazia");
+  if (!raw) throw new CronError("expressão cron vazia");
   const normalized = PRESETS[raw] || raw;
   const fields = normalized.split(/\s+/);
   if (fields.length !== 5) {
-    throw new CronError("a expressao cron precisa ter 5 campos: minuto hora dia mes dia-da-semana");
+    throw new CronError("a expressão cron precisa ter 5 campos: minuto hora dia mês dia-da-semana");
   }
   const parsed = fields.map((field, index) => parseField(field, index));
   return {
@@ -207,7 +207,7 @@ export function nextRunForSchedule(schedule, from = new Date()) {
       let cursor = from;
       for (let attempt = 0; attempt < 5000; attempt++) {
         const candidate = nextCronRun(parsed, cursor);
-        if (!candidate) return { next_run_at: null, error: "nenhuma execucao futura para esta cron" };
+        if (!candidate) return { next_run_at: null, error: "nenhuma execução futura para esta cron" };
         if (accept(candidate)) return { next_run_at: candidate.toISOString(), error: null };
         cursor = candidate;
       }
@@ -228,7 +228,7 @@ export function nextRunForSchedule(schedule, from = new Date()) {
 
     if (schedule.schedule_kind === "daily_times") {
       const times = (schedule.daily_times || []).map(clockToMinutes).filter((value) => value !== null).sort((a, b) => a - b);
-      if (!times.length) return { next_run_at: null, error: "nenhum horario diario configurado" };
+      if (!times.length) return { next_run_at: null, error: "nenhum horário diário configurado" };
       for (let dayOffset = 0; dayOffset < 370; dayOffset++) {
         const day = new Date(from.getTime());
         day.setDate(day.getDate() + dayOffset);
@@ -238,7 +238,7 @@ export function nextRunForSchedule(schedule, from = new Date()) {
           if (accept(candidate)) return { next_run_at: candidate.toISOString(), error: null };
         }
       }
-      return { next_run_at: null, error: "horarios diarios nunca coincidem com a janela" };
+      return { next_run_at: null, error: "horários diários nunca coincidem com a janela" };
     }
 
     return { next_run_at: null, error: `schedule_kind desconhecido: ${schedule.schedule_kind}` };
@@ -254,6 +254,6 @@ export function describeSchedule(schedule) {
   if (schedule.mode === "manual") return "Somente manual";
   if (schedule.schedule_kind === "cron") return `cron: ${schedule.cron}`;
   if (schedule.schedule_kind === "interval") return `a cada ${schedule.interval_minutes} min`;
-  if (schedule.schedule_kind === "daily_times") return `diario as ${(schedule.daily_times || []).join(", ")}`;
+  if (schedule.schedule_kind === "daily_times") return `diário às ${(schedule.daily_times || []).join(", ")}`;
   return "";
 }

@@ -98,7 +98,16 @@ export type ProfileValue = string | number | boolean | null | string[] | Record<
 export type ProfileField = {
   key: string;
   label: string;
-  type: "text" | "textarea" | "number" | "enum" | "tristate" | "string_list" | "years_map" | "record_list";
+  type:
+    | "text"
+    | "textarea"
+    | "number"
+    | "enum"
+    | "enum_or_text"
+    | "tristate"
+    | "string_list"
+    | "years_map"
+    | "record_list";
   hint?: string;
   required?: boolean;
   options?: string[];
@@ -181,6 +190,21 @@ export type IntegrationsPayload = {
   pending_authorization: { active: boolean; started_at: string | null };
 };
 
+export type ConfigField = {
+  path: string;
+  label: string;
+  type: "string" | "int" | "boolean" | "searches" | "known_answers" | "string_map";
+  min?: number;
+  max?: number;
+  value: any;
+};
+
+export type ConfigPayload = {
+  fields: ConfigField[];
+  legacy_config_file: boolean;
+  imported_at: string | null;
+};
+
 export class ApiError extends Error {
   status: number;
   /** Seconds to wait, parsed from a 429 response. */
@@ -254,6 +278,13 @@ export const api = {
       "/api/integrations/notifications",
       { method: "PUT", body: JSON.stringify(patch) }
     ),
+
+  getConfig: () => request<ConfigPayload>("/api/config"),
+  saveConfig: (values: Record<string, any>) =>
+    request<{ applied: string[]; rejected: { path: string; error: string }[]; fields: ConfigField[] }>("/api/config", {
+      method: "PUT",
+      body: JSON.stringify({ values })
+    }),
 
   listPipelines: () => request<{ items: PipelineSchedule[] }>("/api/pipelines"),
   updatePipeline: (pipeline: string, patch: Partial<PipelineSchedule>) =>

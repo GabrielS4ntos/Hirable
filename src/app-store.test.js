@@ -106,13 +106,32 @@ test("schedules accept every supported scheduling kind", () => {
   }
 });
 
+test("daily schedules preserve sub-hour slots across a full work window", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const dailyTimes = [];
+    for (let minutes = 8 * 60; minutes < 22 * 60; minutes += 27) {
+      dailyTimes.push(`${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`);
+    }
+    const daily = store.updateSchedule("network", {
+      mode: "auto",
+      schedule_kind: "daily_times",
+      daily_times: dailyTimes
+    });
+    assert.equal(daily.daily_times.length, 32);
+    assert.equal(daily.daily_times.at(-1), "21:57");
+  } finally {
+    cleanup();
+  }
+});
+
 test("automatic mode requires a usable schedule", () => {
   const { store, cleanup } = freshStore();
   try {
     assert.throws(() => store.updateSchedule("jobs", { mode: "auto", schedule_kind: "cron", cron: "" }), /cron/i);
     assert.throws(
       () => store.updateSchedule("jobs", { mode: "auto", schedule_kind: "daily_times", daily_times: [] }),
-      /horario/i
+      /hor[aá]rio/i
     );
     assert.throws(() => store.updateSchedule("jobs", { mode: "turbo" }), /mode/);
     assert.throws(() => store.updateSchedule("inexistente", { mode: "manual" }), /unknown pipeline/);

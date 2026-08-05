@@ -37,7 +37,7 @@ const EXCLUSIVITY_MARKERS = [
 const GROUPS = [
   {
     id: "pcd",
-    label: "pessoas com deficiencia (PCD)",
+    label: "pessoas com deficiência (PCD)",
     profileKey: "has_disability",
     terms: [
       "pcd",
@@ -169,8 +169,8 @@ export function checkJobEligibility(job, profile) {
   const labels = blocking.map((item) => item.group.label).join(", ");
   const anyUndeclared = blocking.some((item) => item.declared === "nao_declarado");
   const reason = anyUndeclared
-    ? `Vaga exclusiva para ${labels}, mas o perfil nao declara pertencer a esse grupo. Preencha os dados sensiveis no perfil para liberar este tipo de vaga.`
-    : `Vaga exclusiva para ${labels} e o perfil declara nao pertencer a esse grupo.`;
+    ? `Vaga exclusiva para ${labels}, mas o perfil não declara pertencer a esse grupo. Preencha os dados sensíveis no perfil para liberar este tipo de vaga.`
+    : `Vaga exclusiva para ${labels} e o perfil declara não pertencer a esse grupo.`;
 
   return {
     allowed: false,

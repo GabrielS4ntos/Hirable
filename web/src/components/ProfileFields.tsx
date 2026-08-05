@@ -122,6 +122,9 @@ function FieldControl({
         />
       );
 
+    case "enum_or_text":
+      return <EnumOrTextControl id={id} field={field} value={value ?? ""} onChange={onChange} highlighted={highlighted} />;
+
     case "years_map":
       return <YearsMapControl value={value || {}} onChange={onChange} />;
 
@@ -174,6 +177,72 @@ function TristateControl({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * A curated list plus an "Outro" escape hatch. These categories never cover
+ * everyone, so the free-text option is part of the design, not a fallback.
+ */
+function EnumOrTextControl({
+  id,
+  field,
+  value,
+  onChange,
+  highlighted
+}: {
+  id: string;
+  field: ProfileField;
+  value: string;
+  onChange: (value: ProfileValue) => void;
+  highlighted?: boolean;
+}) {
+  const options = field.options || [];
+  const isOther = Boolean(value) && !options.includes(value);
+  const [showText, setShowText] = React.useState(isOther);
+
+  React.useEffect(() => {
+    if (isOther) setShowText(true);
+  }, [isOther]);
+
+  const selected = showText ? "__other__" : value || "__empty__";
+
+  return (
+    <div className="space-y-2">
+      <Select
+        value={selected}
+        onValueChange={(next) => {
+          if (next === "__other__") {
+            setShowText(true);
+            return;
+          }
+          setShowText(false);
+          onChange(next === "__empty__" ? "" : next);
+        }}
+      >
+        <SelectTrigger id={id} className={highlighted ? "border-primary/60 ring-1 ring-primary/30" : undefined}>
+          <SelectValue placeholder="Não informar" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__empty__">Não informar</SelectItem>
+          {options.map((option) => (
+            <SelectItem key={option} value={option}>
+              {option}
+            </SelectItem>
+          ))}
+          <SelectItem value="__other__">Outro…</SelectItem>
+        </SelectContent>
+      </Select>
+
+      {showText ? (
+        <Input
+          value={isOther ? value : ""}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder="Descreva"
+          autoFocus
+        />
+      ) : null}
     </div>
   );
 }

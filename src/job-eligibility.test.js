@@ -39,7 +39,7 @@ test("a PCD-exclusive job is blocked when disability status was not declared", (
   assert.equal(result.allowed, false);
   assert.deepEqual(result.groups, ["pcd"]);
   assert.equal(result.declared, "nao_declarado");
-  assert.match(result.reason, /nao declara pertencer/i);
+  assert.match(result.reason, /n[aã]o declara pertencer/i);
 });
 
 test("a PCD-exclusive job is blocked when the user declared they are not PCD", () => {
@@ -49,7 +49,7 @@ test("a PCD-exclusive job is blocked when the user declared they are not PCD", (
   );
   assert.equal(result.allowed, false);
   assert.equal(result.declared, "declarado_nao");
-  assert.match(result.reason, /declara nao pertencer/i);
+  assert.match(result.reason, /declara n[aã]o pertencer/i);
 });
 
 test("a PCD-exclusive job is allowed when the user declared they are PCD", () => {

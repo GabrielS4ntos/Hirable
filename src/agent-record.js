@@ -180,7 +180,7 @@ function resolveJobSendState(job, evaluation, context) {
     return {
       send_method: "easy_apply",
       send_state: "sent_auto",
-      reason: "LinkedIn ja marca esta vaga como candidatada.",
+      reason: "LinkedIn já marca esta vaga como candidatada.",
       status: "sent"
     };
   }
@@ -277,11 +277,11 @@ export function describeSendState(record) {
     case "in_progress":
       return "Envio em andamento";
     case "sent_auto":
-      return "Enviada pelo processo automatico";
+      return "Enviada pelo processo automático";
     case "sent_manual":
-      return "Enviada manualmente por voce";
+      return "Enviada manualmente por você";
     case "unsupported":
-      return record.send_blocked_reason || "Sem metodo de envio automatico";
+      return record.send_blocked_reason || "Sem método de envio automático";
     case "blocked":
       return record.send_blocked_reason || "Bloqueada pelas regras do agente";
     default:

@@ -174,6 +174,6 @@ test("describeSchedule summarises each kind", () => {
   assert.equal(describeSchedule({ mode: "auto", schedule_kind: "interval", interval_minutes: 45 }), "a cada 45 min");
   assert.equal(
     describeSchedule({ mode: "auto", schedule_kind: "daily_times", daily_times: ["09:00", "18:00"] }),
-    "diario as 09:00, 18:00"
+    "diário às 09:00, 18:00"
   );
 });

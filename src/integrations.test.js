@@ -50,8 +50,8 @@ test("the OAuth client is accepted in installed, web and flat shapes", () => {
 test("an incomplete OAuth client is rejected", () => {
   const { store, cleanup } = freshStore();
   try {
-    assert.throws(() => store.saveOAuthClient("google", '{"installed":{"client_id":"a"}}'), /client_secret|invalido/i);
-    assert.throws(() => store.saveOAuthClient("google", "nao e json"), /invalido/i);
+    assert.throws(() => store.saveOAuthClient("google", '{"installed":{"client_id":"a"}}'), /client_secret|inv[aá]lido/i);
+    assert.throws(() => store.saveOAuthClient("google", "nao e json"), /inv[aá]lido/i);
   } finally {
     cleanup();
   }
@@ -131,7 +131,7 @@ test("email cannot be enabled without a recipient", () => {
 test("an invalid recipient is rejected before anything is saved", () => {
   const { store, cleanup } = freshStore();
   try {
-    assert.throws(() => store.setNotificationSettings({ email_to: "sem-arroba" }), /invalido/i);
+    assert.throws(() => store.setNotificationSettings({ email_to: "sem-arroba" }), /inv[aá]lido/i);
     assert.equal(store.getNotificationSettings().email_to, "");
   } finally {
     cleanup();

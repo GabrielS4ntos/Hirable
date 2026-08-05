@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   PROFILE_SECTIONS,
+  buildProfileResponseSchema,
   declaredDemographics,
   deriveDemographicKeywords,
   emptyProfile,
@@ -155,4 +156,65 @@ test("the model payload carries the resume and hides undeclared demographics", (
 test("the resume excerpt sent to the model is bounded", () => {
   const payload = profileFactsForModel(emptyProfile(), "x".repeat(50000));
   assert.equal(payload.resume_text.length, 12000);
+});
+
+test("demographic selects accept a listed option and free text alike", () => {
+  // The curated lists never cover everyone, so a value outside them is kept.
+  const listed = normalizeProfile({ demographics: { gender: "Mulher", race_ethnicity: "Parda" } });
+  assert.equal(listed.demographics.gender, "Mulher");
+  assert.equal(listed.demographics.race_ethnicity, "Parda");
+
+  const free = normalizeProfile({ demographics: { gender: "Gênero fluido", sexual_orientation: "Pansexual" } });
+  assert.equal(free.demographics.gender, "Gênero fluido");
+  assert.equal(free.demographics.sexual_orientation, "Pansexual");
+
+  // Blank still means "not declared", which is what blocks restricted vacancies.
+  assert.equal(normalizeProfile({ demographics: { gender: "" } }).demographics.gender, "");
+  assert.equal(declaredDemographics(normalizeProfile({})).genero, "nao_declarado");
+});
+
+test("free-text demographics still produce matching option keywords", () => {
+  const profile = normalizeProfile({ demographics: { gender: "Gênero fluido" } });
+  assert.deepEqual(profile.demographics.option_keywords.gender, ["Gênero fluido"]);
+});
+
+test("years by technology arrives from the model as tuples", () => {
+  // The structured-output schema cannot express a free-form map, so the agent
+  // returns [{technology, years}] and it is folded into the canonical map.
+  const profile = normalizeProfile({
+    years_by_technology: [
+      { technology: "Python", years: 6 },
+      { technology: "TypeScript", years: "5" },
+      { technology: "", years: 3 },
+      { technology: "Ruim", years: "abc" }
+    ]
+  });
+  assert.deepEqual(profile.years_by_technology, { Python: 6, TypeScript: 5 });
+});
+
+test("experiences and education are part of the extraction contract", () => {
+  const schema = buildProfileResponseSchema();
+  const properties = schema.properties.profile.properties;
+  assert.equal(properties.recent_experiences.type, "array");
+  assert.equal(properties.education.type, "array");
+  assert.ok(properties.recent_experiences.items.properties.company);
+  assert.ok(properties.education.items.properties.institution);
+  // Required, so the model always returns the key even when the resume is silent.
+  assert.ok(schema.properties.profile.required.includes("recent_experiences"));
+  assert.ok(schema.properties.profile.required.includes("education"));
+});
+
+test("every user-facing label is written in proper Portuguese", () => {
+  // Labels are rendered verbatim in the interface: no unaccented placeholders.
+  const wrong = /\b(Genero|Formacao|Experiencias|Titulo|Area|Instituicao|Conclusao|Raca|deficiencia|Nivel|ingles|Codigo|digitos|Pais|experiencia|verificaveis|sensiveis|Orientacao|Multipla|Fisica|Indigena|Cisgenero|Transgenero|binario)\b/;
+  for (const section of PROFILE_SECTIONS) {
+    assert.doesNotMatch(section.label, wrong, `section ${section.key}`);
+    if (section.description) assert.doesNotMatch(section.description, wrong, `description ${section.key}`);
+    for (const field of section.fields) {
+      assert.doesNotMatch(field.label, wrong, `${section.key}.${field.key}`);
+      if (field.hint) assert.doesNotMatch(field.hint, wrong, `hint ${field.key}`);
+      for (const option of field.options || []) assert.doesNotMatch(option, wrong, `option ${option}`);
+      for (const sub of field.item_fields || []) assert.doesNotMatch(sub.label, wrong, `sub ${sub.key}`);
+    }
+  }
 });

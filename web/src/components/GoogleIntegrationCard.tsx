@@ -244,8 +244,7 @@ export function GoogleIntegrationCard() {
                 {awaitingConsent ? "Aguardando autorização…" : "Conectar com o Google"}
               </Button>
               <p className="text-xs text-muted-foreground">
-                Abre a tela de consentimento do Google. O token volta sozinho para o app — você não precisa copiar
-                nenhum código.
+                Abre a tela de consentimento do Google. O token volta sozinho para o app — você não precisa copiar nenhum código.
               </p>
             </div>
           )}
@@ -266,7 +265,7 @@ export function GoogleIntegrationCard() {
                   type="email"
                   value={emailTo}
                   onChange={(event) => setEmailTo(event.target.value)}
-                  placeholder="voce@exemplo.com"
+                  placeholder="você@exemplo.com"
                 />
                 <Button
                   size="sm"

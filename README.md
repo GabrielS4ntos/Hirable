@@ -40,14 +40,17 @@ npm run web:build
 npm run web:dev
 ```
 
-First run:
+First run — no files to edit:
 
-1. Copy `config.example.json` to the ignored local file `config.json`.
-2. Copy `profile.example.json` to the ignored local file `profile.json` and fill it with trusted facts only.
-3. Copy `secrets.env.example` to `secrets/.env` and provide model keys.
-4. Run `npm install` and `npx playwright install chromium`.
-5. Run `npm run dm:check:headed` and log in to LinkedIn if needed.
-6. Run `npm run dm:check:headless` after the messaging page loads.
+1. `npm install && npx playwright install chromium`
+2. `npm run web:install && npm run web:build`
+3. `npm run web` and open http://127.0.0.1:4321
+4. Complete the onboarding (paste your résumé), add a Gemini key in **Chaves de API**,
+   and set your job searches in **Configurações**.
+5. `npm run dm:check:headed` once, to log in to LinkedIn in the persistent browser profile.
+
+Everything else — schedules, limits, searches, models, alerts, Google — is configured in
+the interface and stored in SQLite.
 
 The browser profile is stored in `.browser-profile` under this folder.
 
@@ -117,6 +120,29 @@ recipient is saved, and you explicitly enable it. Until then every pipeline that
 would send email skips it and logs the reason. Disconnecting the account switches
 email and calendar back off. Tokens live in `oauth_credentials`; the interface only
 ever receives presence flags and metadata, never the client secret or the token.
+
+### Configuration
+
+There is no configuration file to edit. Settings resolve in this order, later winning:
+
+1. **code defaults** (`src/config-defaults.js`) — a fresh install boots with no files;
+2. **`config.json`** — optional legacy override, imported into the database on first boot;
+3. **database** — what you changed in **Configurações**;
+4. **environment** — `AGENT_DATABASE_PATH`, `AGENT_PROFILE_PATH`, `AGENT_BROWSER_PROFILE_DIR`,
+   `LINKEDIN_HEADLESS`, `GOOGLE_REDIRECT_PORT`, for running more than one instance.
+
+Two things deliberately stay out of the database:
+
+- **Guard rails** (`SAFETY` in `src/config-defaults.js`): the patterns the agent must never
+  answer — visa, salary, race, disability, and so on. If these were rows the web interface
+  could write, a bug in the API or a prompt injection reaching a write path could silently
+  widen what the automation discloses on your behalf. Changing them requires editing the
+  file, which shows up in a diff.
+- **Hard ceilings** (`HARD_LIMITS`): a preference may lower a limit, never raise it above
+  what protects the LinkedIn account.
+
+The API refuses any path that is not on the `EDITABLE` whitelist, validates each value on
+its own, and applies the valid ones even when a sibling is rejected.
 
 ### API keys
 

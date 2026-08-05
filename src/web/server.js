@@ -10,6 +10,8 @@ import { AppStore, PIPELINES } from "../app-store.js";
 import { describeSchedule, isValidCron, nextRunForSchedule } from "../cron.js";
 import { Scheduler } from "../scheduler.js";
 import { PROFILE_SECTIONS, declaredDemographics, normalizeProfile, profileCompleteness } from "../profile-schema.js";
+import { bootstrapDatabasePath, importLegacyConfig, legacyConfigExists, resolveConfig } from "../config.js";
+import { EDITABLE, coerceEditable, getPath, setPath } from "../config-defaults.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), "..", "..");
@@ -30,14 +32,9 @@ const MIME = {
   ".map": "application/json; charset=utf-8"
 };
 
-function readConfig() {
-  return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
-}
-
-function databasePath(config) {
-  const configured = config.storage?.database_path || config.jobs_watcher?.semantic_memory?.database_path;
-  if (!configured) throw new Error("storage.database_path is required in config.json");
-  return path.resolve(ROOT, configured);
+/** Effective configuration, rebuilt whenever the user saves a change. */
+function readConfig(store = null) {
+  return resolveConfig({ overrides: store ? store.getConfigOverrides() : null });
 }
 
 class HttpError extends Error {
@@ -62,18 +59,18 @@ async function readBody(req, limitBytes = 1_000_000) {
   let size = 0;
   for await (const chunk of req) {
     size += chunk.length;
-    if (size > limitBytes) throw new HttpError(413, "corpo da requisicao muito grande");
+    if (size > limitBytes) throw new HttpError(413, "corpo da requisição muito grande");
     chunks.push(chunk);
   }
   if (!chunks.length) return {};
   try {
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch {
-    throw new HttpError(400, "JSON invalido");
+    throw new HttpError(400, "JSON inválido");
   }
 }
 
-export function createApp({ store, scheduler, config }) {
+export function createApp({ store, scheduler, getConfig, refreshConfig = () => getConfig() }) {
   const routes = [];
   const route = (method, pattern, handler) => routes.push({ method, pattern, handler });
 
@@ -91,7 +88,7 @@ export function createApp({ store, scheduler, config }) {
     const onboardingComplete = store.isOnboardingComplete();
     return {
       now: new Date().toISOString(),
-      timezone: config.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      timezone: getConfig().timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
       onboarding: { complete: onboardingComplete },
       scheduler: scheduler.status(),
       schedules,
@@ -102,11 +99,11 @@ export function createApp({ store, scheduler, config }) {
       },
       keys: { gemini: geminiKeys, openrouter: openrouterKeys },
       model_gate: {
-        provider: config.model_gate?.provider || null,
-        job_model: config.model_gate?.job_model || null,
-        writer_model: config.model_gate?.writer_model || null,
-        fallback_provider: config.model_gate?.fallback_provider || null,
-        openrouter_model: config.model_gate?.openrouter_model || null
+        provider: getConfig().model_gate?.provider || null,
+        job_model: getConfig().model_gate?.job_model || null,
+        writer_model: getConfig().model_gate?.writer_model || null,
+        fallback_provider: getConfig().model_gate?.fallback_provider || null,
+        openrouter_model: getConfig().model_gate?.openrouter_model || null
       }
     };
   });
@@ -166,7 +163,7 @@ export function createApp({ store, scheduler, config }) {
   route("POST", /^\/api\/profile\/extract$/, async (req) => {
     const body = await readBody(req, 4_000_000);
     const resumeText = String(body.resume_text || "").trim();
-    if (resumeText.length < 40) throw new HttpError(400, "Cole o texto do curriculo antes de preencher");
+    if (resumeText.length < 40) throw new HttpError(400, "Cole o texto do currículo antes de preencher");
 
     const limit = store.consumeRateLimit("profile_extract", { capacity: 3, refillPerSecond: 1 / 30 });
     if (!limit.allowed) {
@@ -184,7 +181,7 @@ export function createApp({ store, scheduler, config }) {
         rate_limit: { remaining: limit.remaining }
       };
     } catch (error) {
-      throw new HttpError(502, `Falha ao analisar o curriculo: ${error.message}`);
+      throw new HttpError(502, `Falha ao analisar o currículo: ${error.message}`);
     }
   });
 
@@ -195,7 +192,7 @@ export function createApp({ store, scheduler, config }) {
 
   /* ----------------------------------------------------------- integrations */
 
-  const googleOAuth = new GoogleOAuthFlow({ store, config });
+  const googleOAuth = new GoogleOAuthFlow({ store, getConfig });
 
   route("GET", /^\/api\/integrations$/, () => ({
     google: store.oauthStatus("google"),
@@ -204,8 +201,8 @@ export function createApp({ store, scheduler, config }) {
       const { ready, enabled, reason } = store.emailDeliveryState();
       return { ready, enabled, reason };
     })(),
-    required_scopes: config.gmail?.scopes || [],
-    redirect_uri: `http://127.0.0.1:${config.gmail?.redirect_port || 45819}/oauth2callback`,
+    required_scopes: getConfig().gmail?.scopes || [],
+    redirect_uri: `http://127.0.0.1:${getConfig().gmail?.redirect_port || 45819}/oauth2callback`,
     pending_authorization: googleOAuth.pending()
   }));
 
@@ -293,7 +290,7 @@ export function createApp({ store, scheduler, config }) {
 
   route("DELETE", /^\/api\/keys\/([\w-]+)$/, (req, res, [id]) => {
     const removed = store.deleteApiKey(id);
-    if (!removed) throw new HttpError(404, "chave nao encontrada");
+    if (!removed) throw new HttpError(404, "chave não encontrada");
     return { items: store.listApiKeys() };
   });
 
@@ -312,7 +309,7 @@ export function createApp({ store, scheduler, config }) {
   route("PUT", /^\/api\/pipelines\/([\w-]+)$/, async (req, res, [pipeline]) => {
     const body = await readBody(req);
     if (body.mode === "auto" && body.schedule_kind === "cron" && !isValidCron(body.cron)) {
-      throw new HttpError(400, "expressao cron invalida");
+      throw new HttpError(400, "expressão cron inválida");
     }
     let updated;
     try {
@@ -326,7 +323,7 @@ export function createApp({ store, scheduler, config }) {
 
   route("POST", /^\/api\/pipelines\/([\w-]+)\/run$/, (req, res, [pipeline]) => {
     const runId = scheduler.enqueue(pipeline, "force");
-    if (!runId) throw new HttpError(409, "este pipeline ja esta na fila ou em execucao");
+    if (!runId) throw new HttpError(409, "este pipeline já está na fila ou em execução");
     return { run_id: runId, scheduler: scheduler.status() };
   });
 
@@ -355,17 +352,17 @@ export function createApp({ store, scheduler, config }) {
 
   route("GET", /^\/api\/records\/([\w-]+)$/, (req, res, [id]) => {
     const record = store.getAgentRecord(id);
-    if (!record) throw new HttpError(404, "registro nao encontrado");
+    if (!record) throw new HttpError(404, "registro não encontrado");
     return { item: record };
   });
 
   route("POST", /^\/api\/records\/([\w-]+)\/send$/, (req, res, [id]) => {
     const record = store.getAgentRecord(id);
-    if (!record) throw new HttpError(404, "registro nao encontrado");
+    if (!record) throw new HttpError(404, "registro não encontrado");
     if (!["available", "failed"].includes(record.send_state)) {
-      throw new HttpError(409, record.send_blocked_reason || "este item nao pode ser enviado");
+      throw new HttpError(409, record.send_blocked_reason || "este item não pode ser enviado");
     }
-    if (record.kind !== "job") throw new HttpError(400, "envio manual disponivel apenas para vagas");
+    if (record.kind !== "job") throw new HttpError(400, "envio manual disponível apenas para vagas");
 
     const runId = scheduler.enqueueCommand("jobs", "jobs:apply-one", [record.record_id], "manual");
     store.setSendState(record.record_id, { send_state: "in_progress", sent_by: "manual" });
@@ -378,35 +375,92 @@ export function createApp({ store, scheduler, config }) {
     items: store.listRuns({ pipeline: url.searchParams.get("pipeline"), limit: url.searchParams.get("limit") || 50 })
   }));
 
+  /* --------------------------------------------------------- configuration */
+
+  /**
+   * The whole editable surface, described by the server so the interface renders
+   * it generically and cannot invent a field that is not allowed to change.
+   */
+  route("GET", /^\/api\/config$/, () => {
+    const config = getConfig();
+    return {
+      fields: EDITABLE.map((field) => ({
+        path: field.path,
+        label: field.label,
+        type: field.type,
+        min: field.min,
+        max: field.max,
+        value: getPath(config, field.path)
+      })),
+      legacy_config_file: legacyConfigExists(),
+      imported_at: store.getSetting("config_imported_at", null)
+    };
+  });
+
+  route("PUT", /^\/api\/config$/, async (req) => {
+    const body = await readBody(req, 2_000_000);
+    const patch = body?.values;
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw new HttpError(400, "envie { values: { caminho: valor } }");
+
+    const overrides = structuredClone(store.getConfigOverrides());
+    const applied = [];
+    const rejected = [];
+
+    // Each field is validated on its own: one bad value never discards the rest.
+    for (const [path, value] of Object.entries(patch)) {
+      try {
+        setPath(overrides, path, coerceEditable(path, value));
+        applied.push(path);
+      } catch (error) {
+        rejected.push({ path, error: error.message });
+      }
+    }
+
+    store.setConfigOverrides(overrides);
+    const config = refreshConfig();
+    return {
+      applied,
+      rejected,
+      fields: EDITABLE.map((field) => ({
+        path: field.path,
+        label: field.label,
+        type: field.type,
+        min: field.min,
+        max: field.max,
+        value: getPath(config, field.path)
+      }))
+    };
+  });
+
   /* -------------------------------------------------------------- settings */
 
   route("GET", /^\/api\/settings$/, () => ({
     settings: store.allSettings(),
     config: {
-      timezone: config.timezone,
+      timezone: getConfig().timezone,
       jobs_watcher: {
-        enabled: config.jobs_watcher?.enabled,
-        easy_apply_enabled: config.jobs_watcher?.easy_apply_enabled,
-        read_only: config.jobs_watcher?.read_only,
-        max_easy_apply_per_run: config.jobs_watcher?.max_easy_apply_per_run,
-        max_easy_apply_per_day: config.jobs_watcher?.max_easy_apply_per_day,
-        max_easy_apply_per_week: config.jobs_watcher?.max_easy_apply_per_week,
-        searches: (config.jobs_watcher?.searches || []).map((item) => item.name)
+        enabled: getConfig().jobs_watcher?.enabled,
+        easy_apply_enabled: getConfig().jobs_watcher?.easy_apply_enabled,
+        read_only: getConfig().jobs_watcher?.read_only,
+        max_easy_apply_per_run: getConfig().jobs_watcher?.max_easy_apply_per_run,
+        max_easy_apply_per_day: getConfig().jobs_watcher?.max_easy_apply_per_day,
+        max_easy_apply_per_week: getConfig().jobs_watcher?.max_easy_apply_per_week,
+        searches: (getConfig().jobs_watcher?.searches || []).map((item) => item.name)
       },
       dm_watcher: {
-        read_only: config.dm_watcher?.read_only,
-        max_threads_to_scan: config.dm_watcher?.max_threads_to_scan
+        read_only: getConfig().dm_watcher?.read_only,
+        max_threads_to_scan: getConfig().dm_watcher?.max_threads_to_scan
       },
       network_invites: {
-        enabled: config.network_invites?.enabled,
-        max_accepts_per_run: config.network_invites?.max_accepts_per_run
+        enabled: getConfig().network_invites?.enabled,
+        max_accepts_per_run: getConfig().network_invites?.max_accepts_per_run
       }
     }
   }));
 
   route("PUT", /^\/api\/settings$/, async (req) => {
     const body = await readBody(req);
-    if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "corpo invalido");
+    if (!body || typeof body !== "object" || Array.isArray(body)) throw new HttpError(400, "corpo inválido");
     for (const [key, value] of Object.entries(body)) store.setSetting(key, value);
     return { settings: store.allSettings() };
   });
@@ -423,9 +477,9 @@ export function createApp({ store, scheduler, config }) {
  * redirects back. No manual copying of authorization codes.
  */
 class GoogleOAuthFlow {
-  constructor({ store, config }) {
+  constructor({ store, getConfig }) {
     this.store = store;
-    this.config = config;
+    this.getConfig = getConfig;
     this.server = null;
     this.startedAt = null;
     this.state = null;
@@ -458,7 +512,7 @@ class GoogleOAuthFlow {
       this.server = http.createServer((req, res) => this.#handleCallback(req, res, client, scopes, port));
       this.server.once("error", (error) => {
         this.server = null;
-        reject(new Error(`nao foi possivel abrir a porta ${port}: ${error.message}`));
+        reject(new Error(`não foi possível abrir a porta ${port}: ${error.message}`));
       });
       this.server.listen(port, "127.0.0.1", resolve);
     });
@@ -490,13 +544,13 @@ class GoogleOAuthFlow {
     const state = url.searchParams.get("state");
 
     if (state !== this.state) {
-      reply(400, "Requisicao de autorizacao invalida.");
+      reply(400, "Requisição de autorização inválida.");
       this.stop();
       return;
     }
     if (error || !code) {
-      this.store.setOAuthError("google", error || "codigo de autorizacao ausente");
-      reply(400, "Autorizacao cancelada.");
+      this.store.setOAuthError("google", error || "código de autorização ausente");
+      reply(400, "Autorização cancelada.");
       this.stop();
       return;
     }
@@ -522,7 +576,7 @@ class GoogleOAuthFlow {
       reply(200, "Conta Google conectada.");
     } catch (caught) {
       this.store.setOAuthError("google", caught.message);
-      reply(500, "Falha ao concluir a autorizacao.");
+      reply(500, "Falha ao concluir a autorização.");
     } finally {
       this.stop();
     }
@@ -567,19 +621,19 @@ function runCliJson(command, args = [], { input = null, timeoutMs = 120_000 } = 
     child.on("close", (code) => {
       clearTimeout(timer);
       if (code !== 0) {
-        const message = stderr.trim().split("\n").filter(Boolean).pop() || `codigo de saida ${code}`;
+        const message = stderr.trim().split("\n").filter(Boolean).pop() || `código de saída ${code}`;
         reject(new Error(message.slice(0, 400)));
         return;
       }
       const opening = stdout.indexOf("{");
       if (opening === -1) {
-        reject(new Error("a saida do comando nao continha JSON"));
+        reject(new Error("a saída do comando não continha JSON"));
         return;
       }
       try {
         resolve(JSON.parse(stdout.slice(opening)));
       } catch (error) {
-        reject(new Error(`resposta invalida do agente: ${error.message}`));
+        reject(new Error(`resposta inválida do agente: ${error.message}`));
       }
     });
 
@@ -615,7 +669,7 @@ async function serveStatic(req, res, pathname) {
     filePath = path.join(DIST_DIR, "index.html");
     if (!fs.existsSync(filePath)) {
       res.writeHead(503, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end("Interface ainda nao compilada. Rode: npm run web:build (ou npm run web:dev para desenvolvimento).");
+      res.end("Interface ainda não compilada. Rode: npm run web:build (ou npm run web:dev para desenvolvimento).");
       return;
     }
   }
@@ -630,10 +684,22 @@ async function serveStatic(req, res, pathname) {
 }
 
 export function startServer({ port = PORT, host = HOST } = {}) {
-  const config = readConfig();
-  const store = new AppStore(databasePath(config));
+  const store = new AppStore(bootstrapDatabasePath());
+
+  // Existing installs keep their settings: config.json is copied into the
+  // database once, after which the file is optional.
+  const imported = importLegacyConfig(store);
+  if (imported.imported) {
+    console.log(`[web] config.json importado para o banco (${imported.count} campos)`);
+    for (const problem of imported.skipped) console.warn(`[web] ignorado -> ${problem}`);
+  }
+
+  let config = readConfig(store);
+  const getConfig = () => config;
+  const refreshConfig = () => { config = readConfig(store); return config; };
+
   const scheduler = new Scheduler(store);
-  const { routes } = createApp({ store, scheduler, config });
+  const { routes } = createApp({ store, scheduler, getConfig, refreshConfig });
 
   const server = http.createServer(async (req, res) => {
     const url = new URL(req.url, `http://${req.headers.host || "localhost"}`);
@@ -641,7 +707,7 @@ export function startServer({ port = PORT, host = HOST } = {}) {
     // Local-only tool: reject cross-origin browser callers outright.
     const origin = req.headers.origin;
     if (origin && !/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin)) {
-      sendJson(res, 403, { error: "origem nao permitida" });
+      sendJson(res, 403, { error: "origem não permitida" });
       return;
     }
 
@@ -660,7 +726,7 @@ export function startServer({ port = PORT, host = HOST } = {}) {
         }
         return;
       }
-      sendJson(res, 404, { error: "rota nao encontrada" });
+      sendJson(res, 404, { error: "rota não encontrada" });
       return;
     }
 

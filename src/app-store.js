@@ -12,13 +12,13 @@ export const PIPELINES = [
     pipeline: "dm",
     label: "Mensagens diretas",
     command: "dm:check",
-    description: "Le a caixa de entrada, responde DMs novas e agenda entrevistas."
+    description: "Lê a caixa de entrada, responde DMs novas e agenda entrevistas."
   },
   {
     pipeline: "network",
     label: "Convites de rede",
     command: "network:accept",
-    description: "Aceita convites pendentes de conexao."
+    description: "Aceita convites pendentes de conexão."
   },
   {
     pipeline: "jobs",
@@ -367,9 +367,9 @@ export class AppStore {
       : Math.max(0, Math.min(3600, Number(patch.jitter_seconds) || 0));
 
     if (mode === "auto") {
-      if (scheduleKind === "cron" && !cron) throw new Error("no modo automatico a expressao cron e obrigatoria");
+      if (scheduleKind === "cron" && !cron) throw new Error("no modo automático a expressão cron é obrigatória");
       if (scheduleKind === "daily_times" && dailyTimes.length === 0) {
-        throw new Error("informe ao menos um horario no formato HH:MM");
+        throw new Error("informe ao menos um horário no formato HH:MM");
       }
     }
 
@@ -604,6 +604,27 @@ export class AppStore {
     `).run(nowIso(), cutoff).changes || 0);
   }
 
+  /* --------------------------------------------------------- configuration */
+
+  /**
+   * User configuration overrides, stored as one JSON document and cached in
+   * memory: every pipeline run and API call resolves the config, so this must
+   * not be a query each time.
+   */
+  getConfigOverrides() {
+    if (this.#configCache) return this.#configCache;
+    this.#configCache = this.getSetting("config_overrides", {}) || {};
+    return this.#configCache;
+  }
+
+  setConfigOverrides(overrides) {
+    this.setSetting("config_overrides", overrides || {});
+    this.#configCache = null;
+    return this.getConfigOverrides();
+  }
+
+  #configCache = null;
+
   /* ------------------------------------------------- google oauth & alerts */
 
   /** Full credentials including secrets. Internal use only — never sent to the UI. */
@@ -646,7 +667,7 @@ export class AppStore {
     const parsed = typeof clientJson === "string" ? safeParse(clientJson) : clientJson;
     const installed = parsed?.installed || parsed?.web || parsed;
     if (!installed?.client_id || !installed?.client_secret) {
-      throw new Error("JSON invalido: e preciso um client OAuth de aplicativo para Desktop com client_id e client_secret");
+      throw new Error("JSON inválido: é preciso um client OAuth de aplicativo para Desktop com client_id e client_secret");
     }
     const timestamp = nowIso();
     const client = { client_id: installed.client_id, client_secret: installed.client_secret };
@@ -752,7 +773,7 @@ export class AppStore {
 
     const emailTo = patch.email_to === undefined ? current.email_to : String(patch.email_to || "").trim().slice(0, 200);
     const emailFrom = patch.email_from === undefined ? current.email_from : String(patch.email_from || "").trim().slice(0, 200);
-    if (emailTo && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailTo)) throw new Error("e-mail de destino invalido");
+    if (emailTo && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(emailTo)) throw new Error("e-mail de destino inválido");
 
     const wantsEmail = patch.email_enabled === undefined ? current.email_enabled : Boolean(patch.email_enabled);
     const wantsCalendar = patch.calendar_enabled === undefined ? current.calendar_enabled : Boolean(patch.calendar_enabled);
@@ -971,7 +992,10 @@ export function normalizeClock(value) {
 export function normalizeDailyTimes(value) {
   const list = Array.isArray(value) ? value : String(value || "").split(/[,\s]+/);
   const clean = list.map(normalizeClock).filter(Boolean);
-  return Array.from(new Set(clean)).sort().slice(0, 24);
+  // Sub-hour cadences can legitimately need more than 24 entries in one day
+  // (08:00-22:00 every 27 minutes needs 31). Keep a bounded list without
+  // truncating supported schedules.
+  return Array.from(new Set(clean)).sort().slice(0, 64);
 }
 
 export function normalizeWeekdays(value) {

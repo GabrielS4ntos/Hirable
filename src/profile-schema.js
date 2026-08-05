@@ -17,15 +17,15 @@ export const PROFILE_SECTIONS = [
   {
     key: "identity",
     label: "Identidade e contato",
-    description: "Usado para preencher os campos fixos do formulario Easy Apply.",
+    description: "Usado para preencher os campos fixos do formulário Easy Apply.",
     fields: [
-      { key: "full_name", label: "Nome completo", type: "text", required: true, hint: "Como aparece no curriculo." },
-      { key: "name_aliases", label: "Outros nomes usados", type: "string_list", hint: "Nome de exibicao no LinkedIn, apelido profissional." },
+      { key: "full_name", label: "Nome completo", type: "text", required: true, hint: "Como aparece no currículo." },
+      { key: "name_aliases", label: "Outros nomes usados", type: "string_list", hint: "Nome de exibição no LinkedIn, apelido profissional." },
       { key: "email", label: "E-mail", type: "text", required: true },
-      { key: "phone_country", label: "Codigo do pais do telefone", type: "text", hint: "Exatamente como o LinkedIn mostra, ex: Brazil (+55)." },
-      { key: "phone_number_digits", label: "Telefone (somente digitos)", type: "text" },
+      { key: "phone_country", label: "Código do país do telefone", type: "text", hint: "Exatamente como o LinkedIn mostra, ex: Brazil (+55)." },
+      { key: "phone_number_digits", label: "Telefone (somente dígitos)", type: "text" },
       { key: "city", label: "Cidade", type: "text" },
-      { key: "country", label: "Pais", type: "text" },
+      { key: "country", label: "País", type: "text" },
       { key: "postal_code", label: "CEP", type: "text" },
       { key: "linkedin_url", label: "URL do LinkedIn", type: "text" }
     ]
@@ -33,18 +33,18 @@ export const PROFILE_SECTIONS = [
   {
     key: "professional",
     label: "Perfil profissional",
-    description: "Base para a avaliacao de aderencia das vagas.",
+    description: "Base para a avaliação de aderência das vagas.",
     fields: [
-      { key: "headline", label: "Titulo profissional", type: "text", hint: "Ex: AI Software Engineer | Full Stack Developer." },
-      { key: "target_roles", label: "Cargos alvo", type: "string_list" },
-      { key: "total_software_engineering_years", label: "Anos de experiencia total", type: "number" },
+      { key: "headline", label: "Título profissional", type: "text", hint: "Ex: AI Software Engineer | Full Stack Developer." },
+      { key: "target_roles", label: "Cargos-alvo", type: "string_list" },
+      { key: "total_software_engineering_years", label: "Anos de experiência total", type: "number" },
       { key: "seniority", label: "Senioridade", type: "enum", options: ["junior", "pleno", "senior", "staff", "principal"] },
-      { key: "english_level", label: "Nivel de ingles", type: "enum", options: ["A1", "A2", "B1", "B2", "C1", "C2", "native"] },
+      { key: "english_level", label: "Nível de inglês", type: "enum", options: ["A1", "A2", "B1", "B2", "C1", "C2", "native"] },
       { key: "other_languages", label: "Outros idiomas", type: "string_list", hint: "Ex: Espanhol - B1." },
-      { key: "expected_salary_usd_gross_monthly", label: "Pretensao mensal (USD bruto)", type: "number" },
-      { key: "expected_salary_brl_monthly", label: "Pretensao mensal (BRL)", type: "number" },
+      { key: "expected_salary_usd_gross_monthly", label: "Pretensão mensal (USD bruto)", type: "number" },
+      { key: "expected_salary_brl_monthly", label: "Pretensão mensal (BRL)", type: "number" },
       { key: "recent_core_technologies", label: "Tecnologias principais", type: "string_list" },
-      { key: "facts", label: "Fatos verificaveis", type: "string_list", hint: "Frases curtas que os agentes podem usar em respostas e formularios." }
+      { key: "facts", label: "Fatos verificáveis", type: "string_list", hint: "Frases curtas que os agentes podem usar em respostas e formulários." }
     ]
   },
   {
@@ -52,51 +52,78 @@ export const PROFILE_SECTIONS = [
     label: "Disponibilidade e elegibilidade",
     description: "Define a quais vagas o agente pode se candidatar.",
     fields: [
-      { key: "work_authorization_countries", label: "Paises onde pode trabalhar legalmente", type: "string_list" },
-      { key: "requires_visa_sponsorship", label: "Precisa de patrocinio de visto", type: "tristate" },
-      { key: "willing_to_relocate", label: "Aceita mudar de cidade/pais", type: "tristate" },
+      { key: "work_authorization_countries", label: "Países onde pode trabalhar legalmente", type: "string_list" },
+      { key: "requires_visa_sponsorship", label: "Precisa de patrocínio de visto", type: "tristate" },
+      { key: "willing_to_relocate", label: "Aceita mudar de cidade/país", type: "tristate" },
       { key: "remote_only", label: "Somente vagas remotas", type: "tristate" },
-      { key: "notice_period_days", label: "Aviso previo (dias)", type: "number" },
-      { key: "available_from", label: "Disponivel a partir de", type: "text", hint: "Data ou texto curto, ex: imediato." }
+      { key: "notice_period_days", label: "Aviso prévio (dias)", type: "number" },
+      { key: "available_from", label: "Disponível a partir de", type: "text", hint: "Data ou texto curto, ex: imediato." }
     ]
   },
   {
     key: "demographics",
-    label: "Dados sensiveis e vagas afirmativas",
+    label: "Dados sensíveis e vagas afirmativas",
     description:
-      "Preencha apenas o que aceitar declarar. Sem estes dados o agente NAO se candidata a vagas exclusivas " +
-      "(PCD, veteranos, programas afirmativos) e opta por 'prefiro nao responder' nos formularios.",
+      "Preencha apenas o que aceitar declarar. Sem estes dados o agente NÃO se candidata a vagas exclusivas " +
+      "(PCD, veteranos, programas afirmativos) e opta por 'prefiro não responder' nos formulários.",
     sensitive: true,
     fields: [
-      { key: "has_disability", label: "Pessoa com deficiencia (PCD)", type: "tristate", hint: "Deixe em branco para nunca declarar." },
-      { key: "disability_details", label: "Detalhe da deficiencia", type: "text", hint: "Opcional. Usado apenas se voce declarar ser PCD." },
-      { key: "is_veteran", label: "Veterano das forcas armadas", type: "tristate" },
-      { key: "gender", label: "Genero", type: "text" },
-      { key: "gender_identity", label: "Identidade de genero", type: "text" },
-      { key: "race_ethnicity", label: "Raca / etnia", type: "text" },
-      { key: "sexual_orientation", label: "Orientacao sexual", type: "text" }
+      { key: "has_disability", label: "Pessoa com deficiência (PCD)", type: "tristate", hint: "Deixe em branco para nunca declarar." },
+      {
+        key: "disability_details",
+        label: "Tipo de deficiência",
+        type: "enum_or_text",
+        options: ["Física", "Auditiva", "Visual", "Intelectual", "Múltipla", "Reabilitado do INSS"],
+        hint: "Opcional. Usado apenas se você declarar ser PCD."
+      },
+      { key: "is_veteran", label: "Veterano das forças armadas", type: "tristate" },
+      {
+        key: "gender",
+        label: "Gênero",
+        type: "enum_or_text",
+        options: ["Mulher", "Homem", "Não-binário"]
+      },
+      {
+        key: "gender_identity",
+        label: "Identidade de gênero",
+        type: "enum_or_text",
+        options: ["Cisgênero", "Transgênero", "Não-binário"]
+      },
+      {
+        key: "race_ethnicity",
+        label: "Raça / etnia",
+        type: "enum_or_text",
+        // Categorias do IBGE, que são as usadas nos formulários brasileiros.
+        options: ["Branca", "Preta", "Parda", "Amarela", "Indígena"]
+      },
+      {
+        key: "sexual_orientation",
+        label: "Orientação sexual",
+        type: "enum_or_text",
+        options: ["Heterossexual", "Homossexual", "Bissexual", "Assexual"]
+      }
     ]
   },
   {
     key: "skills",
     label: "Anos por tecnologia",
-    description: "Responde diretamente as perguntas 'quantos anos de experiencia com X' do Easy Apply.",
+    description: "Responde diretamente às perguntas 'quantos anos de experiência com X' do Easy Apply.",
     fields: [
       { key: "years_by_technology", label: "Anos por tecnologia", type: "years_map", hint: "Ex: TypeScript = 5." }
     ]
   },
   {
     key: "recent_experiences",
-    label: "Experiencias recentes",
+    label: "Experiências recentes",
     fields: [
       {
         key: "recent_experiences",
-        label: "Experiencias",
+        label: "Experiências",
         type: "record_list",
         item_fields: [
           { key: "company", label: "Empresa", type: "text" },
           { key: "role", label: "Cargo", type: "text" },
-          { key: "start", label: "Inicio (AAAA-MM)", type: "text" },
+          { key: "start", label: "Início (AAAA-MM)", type: "text" },
           { key: "end", label: "Fim (AAAA-MM ou vazio)", type: "text" },
           { key: "technologies", label: "Tecnologias", type: "string_list" }
         ]
@@ -105,17 +132,17 @@ export const PROFILE_SECTIONS = [
   },
   {
     key: "education",
-    label: "Formacao",
+    label: "Formação",
     fields: [
       {
         key: "education",
-        label: "Formacoes",
+        label: "Formações",
         type: "record_list",
         item_fields: [
-          { key: "degree", label: "Titulo", type: "text" },
-          { key: "field", label: "Area", type: "text" },
-          { key: "institution", label: "Instituicao", type: "text" },
-          { key: "end", label: "Conclusao", type: "text" }
+          { key: "degree", label: "Título", type: "text" },
+          { key: "field", label: "Área", type: "text" },
+          { key: "institution", label: "Instituição", type: "text" },
+          { key: "end", label: "Conclusão", type: "text" }
         ]
       }
     ]
@@ -201,6 +228,11 @@ function coerce(field, value) {
       const text = cleanText(value, 40);
       return (field.options || []).includes(text) ? text : "";
     }
+
+    // A curated list plus free text: these categories never cover everyone, so a
+    // value outside the list is kept instead of silently discarded.
+    case "enum_or_text":
+      return cleanText(value, 120);
     default:
       return cleanText(value, field.key === "disability_details" ? 300 : 400);
   }
@@ -293,6 +325,8 @@ export function buildProfileResponseSchema() {
         return { type: "boolean", nullable: true };
       case "enum":
         return { type: "string", nullable: true, enum: field.options || [] };
+      case "enum_or_text":
+        return { type: "string", nullable: true };
       case "string_list":
         return { type: "array", items: { type: "string" } };
       case "years_map":

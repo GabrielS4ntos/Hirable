@@ -9,6 +9,37 @@ const CLI_PATH = path.join(ROOT, "src", "cli.js");
 
 const DEFAULT_TICK_MS = 30_000;
 const DEFAULT_MAX_RUNTIME_MS = 30 * 60 * 1000;
+const INBOX_PIPELINES = new Set(["network", "dm"]);
+
+/**
+ * Resolves network/DM as one complete future pair. An orphan DM whose network
+ * slot is already in the past is deliberately skipped after boot or downtime.
+ */
+export function nextInboxPair(networkSchedule, dmSchedule, from = new Date(), offsetMinutes = 5) {
+  if (!networkSchedule || !dmSchedule) return { network: null, dm: null, error: "inbox schedules not found" };
+  if (networkSchedule.mode !== "auto" || dmSchedule.mode !== "auto") {
+    return { network: null, dm: null, error: "network and dm must both be automatic" };
+  }
+  if (networkSchedule.schedule_kind !== "daily_times" || dmSchedule.schedule_kind !== "daily_times") {
+    return { network: null, dm: null, error: "network and dm must use daily_times" };
+  }
+
+  let cursor = new Date(from);
+  for (let attempt = 0; attempt < 500; attempt++) {
+    const networkResult = nextRunForSchedule(networkSchedule, cursor);
+    if (!networkResult.next_run_at) return { network: null, dm: null, error: networkResult.error || "no future network slot" };
+    const networkAt = new Date(networkResult.next_run_at);
+    const expectedDmAt = new Date(networkAt.getTime() + offsetMinutes * 60_000);
+    const dmResult = nextRunForSchedule(dmSchedule, networkAt);
+    if (!dmResult.next_run_at) return { network: null, dm: null, error: dmResult.error || "no future dm slot" };
+    const dmAt = new Date(dmResult.next_run_at);
+    if (dmAt.getTime() === expectedDmAt.getTime()) {
+      return { network: networkAt.toISOString(), dm: dmAt.toISOString(), error: null };
+    }
+    cursor = networkAt;
+  }
+  return { network: null, dm: null, error: "no complete future inbox pair" };
+}
 
 /**
  * Runs pipelines according to the schedules stored in SQLite.
@@ -57,14 +88,29 @@ export class Scheduler {
   }
 
   /** Recomputes next_run_at for every pipeline (called on boot and after edits). */
-  refreshAllNextRuns() {
-    for (const schedule of this.store.listSchedules()) this.refreshNextRun(schedule.pipeline);
+  refreshAllNextRuns(from = new Date()) {
+    const schedules = this.store.listSchedules();
+    if (schedules.some((schedule) => INBOX_PIPELINES.has(schedule.pipeline))) this.refreshInboxPair(from);
+    for (const schedule of schedules) {
+      if (!INBOX_PIPELINES.has(schedule.pipeline)) this.refreshNextRun(schedule.pipeline, from);
+    }
   }
 
-  refreshNextRun(pipeline) {
+  refreshInboxPair(from = new Date()) {
+    const network = this.store.getSchedule("network");
+    const dm = this.store.getSchedule("dm");
+    const pair = nextInboxPair(network, dm, from);
+    const lastStatus = pair.error ? `schedule_error: ${pair.error}` : undefined;
+    if (network) this.store.setScheduleRuntime("network", { next_run_at: pair.network, last_status: lastStatus ?? network.last_status });
+    if (dm) this.store.setScheduleRuntime("dm", { next_run_at: pair.dm, last_status: lastStatus ?? dm.last_status });
+    return pair;
+  }
+
+  refreshNextRun(pipeline, from = new Date()) {
+    if (INBOX_PIPELINES.has(pipeline)) return this.refreshInboxPair(from)[pipeline];
     const schedule = this.store.getSchedule(pipeline);
     if (!schedule) return null;
-    const { next_run_at, error } = nextRunForSchedule(schedule, new Date());
+    const { next_run_at, error } = nextRunForSchedule(schedule, from);
     this.store.setScheduleRuntime(pipeline, {
       next_run_at,
       last_status: error ? `schedule_error: ${error}` : schedule.last_status

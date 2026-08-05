@@ -14,6 +14,7 @@ import { Separator } from "@/components/ui/separator";
 import { useToast } from "@/components/ui/toast";
 import type { PageProps } from "@/lib/page";
 import { GoogleIntegrationCard } from "@/components/GoogleIntegrationCard";
+import { GeneralSettingsCard } from "@/components/GeneralSettingsCard";
 
 const MODES: { value: ScheduleMode; label: string; hint: string }[] = [
   { value: "auto", label: "Automático", hint: "O scheduler executa sozinho conforme o agendamento." },
@@ -36,11 +37,12 @@ const CRON_PRESETS = [
 
 export function SettingsPage(_props: PageProps) {
   const pipelines = usePolling(api.listPipelines, 8000);
-  const settings = usePolling(api.getSettings, 0);
 
   return (
     <div className="space-y-6">
       <GoogleIntegrationCard />
+
+      <GeneralSettingsCard />
 
       <div className="space-y-4">
         {pipelines.data?.items.map((schedule) => (
@@ -54,34 +56,6 @@ export function SettingsPage(_props: PageProps) {
         ) : null}
       </div>
 
-      {settings.data ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Limites operacionais</CardTitle>
-            <CardDescription>
-              Definidos em <code className="font-mono text-xs">config.json</code>. Exibidos aqui para referência ao
-              montar o agendamento — um cron muito frequente não ultrapassa estes tetos.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-x-8 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-            <Stat label="Easy Apply por execução" value={settings.data.config.jobs_watcher?.max_easy_apply_per_run} />
-            <Stat label="Easy Apply por dia" value={settings.data.config.jobs_watcher?.max_easy_apply_per_day} />
-            <Stat label="Easy Apply por semana" value={settings.data.config.jobs_watcher?.max_easy_apply_per_week} />
-            <Stat label="Convites por execução" value={settings.data.config.network_invites?.max_accepts_per_run} />
-            <Stat label="Conversas por execução" value={settings.data.config.dm_watcher?.max_threads_to_scan} />
-            <Stat label="Fuso horário" value={settings.data.config.timezone} />
-          </CardContent>
-        </Card>
-      ) : null}
-    </div>
-  );
-}
-
-function Stat({ label, value }: { label: string; value: unknown }) {
-  return (
-    <div className="flex items-baseline justify-between gap-3 border-b border-border/60 pb-2">
-      <span className="text-muted-foreground">{label}</span>
-      <span className="font-mono font-medium">{String(value ?? "—")}</span>
     </div>
   );
 }
