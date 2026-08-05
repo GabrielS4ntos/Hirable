@@ -25,6 +25,7 @@ npm run network:accept
 npm run jobs:scan
 npm run jobs:apply
 npm run jobs:apply-one -- <record_id|job_id>
+npm run profile:extract < curriculo.txt
 npm run jobs:form-smoke -- 'https://www.linkedin.com/jobs/view/<id>/apply/?openSDUIApplyFlow=true'
 npm run semantic:mock
 npm run semantic:smoke
@@ -70,8 +71,52 @@ Screens:
 
 - **Painel** — counters, per-pipeline status, "Executar agora" and run history.
 - **Vagas analisadas** — every analyzed item in one table with an **Enviar** button.
-- **Configurações** — scheduling mode and schedule per pipeline.
+- **Perfil** — the facts every agent uses, editable at any time.
+- **Configurações** — Google integration, alerts and the schedule of each pipeline.
 - **Chaves de API** — Gemini and OpenRouter keys.
+
+### Onboarding
+
+On first open the console shows an onboarding flow instead of the app: paste the
+résumé text, press **Preencher**, and an agent extracts the profile fields for you
+to review. Extraction only fills the form — nothing is written until you save — and
+it is rate limited to 3 immediate attempts, then one more every 30 seconds.
+
+The completed flag lives in `user_profile` and is cached in memory on the server
+and in `localStorage` on the client, so the database is not queried on every poll.
+
+The extraction uses the provider's structured-output mode: the JSON shape is
+enforced by the decoder from a schema generated out of `src/profile-schema.js`,
+not merely requested in the prompt. Fields that fail validation fall back to their
+default without discarding the rest of the extraction.
+
+### Profile and eligibility
+
+`src/profile-schema.js` is the single definition of the profile, consumed by the
+interface, the extraction prompt and the pipelines. The stored profile is merged
+over the legacy `profile.json`, which stays supported as a fallback.
+
+Sensitive fields (PCD/disability, veteran, gender, race, orientation) are a
+three-state choice, and **"Não informar" is the default**. This matters: the résumé
+cannot be trusted to state whether you belong to an affirmative-action group, so
+`src/job-eligibility.js` blocks any vacancy exclusive to a group the profile does
+not explicitly declare — silence is never read as a yes. The same gate runs on the
+manual send, so a click cannot bypass it. Plain diversity boilerplate ("pessoas com
+deficiência são bem-vindas") does not block anything: a restriction is only
+detected when a group term appears next to an exclusivity marker.
+
+### Google (Gmail and Calendar)
+
+Configured in **Configurações → Google**. Paste the OAuth client JSON downloaded
+from Google Cloud (the screen carries the step-by-step and links to the console),
+then click connect: the browser opens Google's consent screen and the token comes
+back to a one-shot loopback listener. No authorization code to copy by hand.
+
+Email sending is off until three things are true: an account is connected, a
+recipient is saved, and you explicitly enable it. Until then every pipeline that
+would send email skips it and logs the reason. Disconnecting the account switches
+email and calendar back off. Tokens live in `oauth_credentials`; the interface only
+ever receives presence flags and metadata, never the client secret or the token.
 
 ### API keys
 
