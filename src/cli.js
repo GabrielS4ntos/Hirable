@@ -32,6 +32,7 @@ import { RESUME_GATE_CODE, evaluateResumeGate } from "./resume-gate.js";
 import { canUploadResume } from "./resume-upload.js";
 import { LINKEDIN_GATE_CODE, evaluateLinkedInGate } from "./linkedin-gate.js";
 import { explainSalaryRefusal, isSalaryLabel, resolveSalaryAnswer } from "./salary-answer.js";
+import { describeModelError, isInvalidKeyError, isKeyScopedModelError } from "./model-error.js";
 import { detectSession, sessionRecord } from "./linkedin-session.js";
 import { ensureResumeSelected } from "./resume-selection.js";
 import { renderAlertEmail } from "./email-template.js";
@@ -1250,13 +1251,21 @@ async function chooseGeminiApiKey(config) {
 function noteApiKeyResult(config, keyId, error = null) {
   if (!keyId) return;
   try {
-    openAppStore(config).markApiKeyUsed(keyId, error);
+    // Stored readable: this string is shown next to the key on the keys screen,
+    // where a provider's JSON payload tells the user nothing they can act on.
+    openAppStore(config).markApiKeyUsed(keyId, error ? describeModelError(error) : null);
   } catch {}
 }
 
+/**
+ * Whether to try this provider's next key.
+ *
+ * Quota *and* credentials: both say something about the key that was used, not
+ * about what was asked. Only counting quota meant one revoked key took the
+ * whole provider down while a perfectly good sibling key sat unused.
+ */
 function isRetryableModelKeyError(error) {
-  const message = `${error?.message || ""} ${error?.code || ""} ${error?.status || ""} ${error?.type || ""}`.toLowerCase();
-  return /429|quota|rate|resource_exhausted|too many|exceeded/.test(message);
+  return isKeyScopedModelError(error);
 }
 
 function semanticMemorySettings(config) {
@@ -1667,10 +1676,24 @@ async function callJsonModel({ model, prompt, maxOutputTokens, responseSchema = 
         model: providerModel,
         error: (error?.message || String(error)).slice(0, 500)
       });
-      if (!canFallback) throw error;
+      if (!canFallback) break;
     }
   }
-  throw lastError || new Error("model call failed");
+
+  // Every provider is exhausted. A refused credential is the one failure the
+  // user can actually fix, so it is named — provider, key label and where to
+  // change it — instead of a provider's raw JSON reaching the interface.
+  const failed = attempts[attempts.length - 1];
+  const summary = describeModelError(lastError, { provider: failed?.label || failed?.id });
+  if (isInvalidKeyError(lastError)) {
+    await notifyOperationalAlert(summary, { command: "model_gate", status: "invalid_api_key", level: "error" })
+      .catch(() => {});
+  }
+
+  const surfaced = new Error(summary);
+  surfaced.cause = lastError;
+  surfaced.code = isInvalidKeyError(lastError) ? "invalid_api_key" : "model_call_failed";
+  throw surfaced;
 }
 
 /**
@@ -3712,7 +3735,9 @@ async function runResumeIndex(resumeId = process.argv[3]) {
     console.log(JSON.stringify(result, null, 2));
     return result;
   } catch (error) {
-    if (resume) store.setResumeIndex(id, { error: error.message });
+    // A readable sentence, not the provider's JSON: this string is shown on the
+    // résumé card and is the only thing the user sees when indexing fails.
+    if (resume) store.setResumeIndex(id, { error: describeModelError(error) });
     throw error;
   }
 }

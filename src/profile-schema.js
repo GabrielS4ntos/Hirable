@@ -186,6 +186,28 @@ function cleanText(value, limit = 400) {
   return String(value ?? "").replace(/\s+/g, " ").trim().slice(0, limit);
 }
 
+/** Property names a model reaches for when it wraps a list item in an object. */
+const LIST_ITEM_KEYS = ["fact", "text", "value", "name", "title", "label", "description", "statement"];
+
+/**
+ * One entry of a string list.
+ *
+ * Structured output asks for strings, but a model sometimes returns
+ * `{ fact: "…", source: "…" }` anyway. `String(object)` turns that into the
+ * literal "[object Object]", which is then stored and shown to the user with
+ * the real content gone — so an object is unwrapped when it carries an obvious
+ * text field, and dropped when it does not. Nothing is ever stored as
+ * "[object Object]".
+ */
+function cleanListItem(item) {
+  if (item && typeof item === "object" && !Array.isArray(item)) {
+    const key = LIST_ITEM_KEYS.find((candidate) => typeof item[candidate] === "string" && item[candidate].trim());
+    return key ? cleanText(item[key], 200) : "";
+  }
+  const text = cleanText(item, 200);
+  return text === "[object Object]" ? "" : text;
+}
+
 function coerce(field, value) {
   switch (field.type) {
     case "number": {
@@ -200,7 +222,7 @@ function coerce(field, value) {
     }
     case "string_list": {
       const list = Array.isArray(value) ? value : String(value ?? "").split(/[,\n;]/);
-      return Array.from(new Set(list.map((item) => cleanText(item, 200)).filter(Boolean))).slice(0, 40);
+      return Array.from(new Set(list.map((item) => cleanListItem(item)).filter(Boolean))).slice(0, 40);
     }
     case "years_map": {
       // Accepts both the internal map form and the [{technology, years}] array the

@@ -463,7 +463,14 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
       store.setResumeIndex(id, { error: extracted.reason });
     } else {
       runCliJson("resume:index", [id], { input: extracted.text, timeoutMs: 120_000 })
-        .catch((error) => store.setResumeIndex(id, { error: error.message }));
+        .catch(() => {
+          // The CLI already wrote a readable reason before it exited. Only fill
+          // one in when it did not get that far — otherwise this overwrites the
+          // real message with the tail of a stack trace.
+          if (!store.getResume(id)?.index_error) {
+            store.setResumeIndex(id, { error: "a indexação do currículo não pôde ser concluída" });
+          }
+        });
     }
 
     return { id, items: store.listResumes(), extraction: { kind: extracted.kind, extracted: extracted.extracted, reason: extracted.reason } };

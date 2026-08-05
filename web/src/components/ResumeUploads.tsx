@@ -42,6 +42,18 @@ export function ResumeUploads({ resumes, onChange }: { resumes: ResumeDocument[]
   const [busy, setBusy] = React.useState<string | null>(null);
   const [dragging, setDragging] = React.useState(false);
 
+  // Indexing runs in the background after the upload responds, so without this
+  // the card span the "analisando" spinner until the page was reloaded — even
+  // once the index (or its failure) had already been written.
+  const pending = resumes.some((resume) => !resume.indexed && !resume.index_error);
+  React.useEffect(() => {
+    if (!pending) return;
+    const timer = setInterval(() => {
+      api.listResumes().then((result) => onChange(result.items)).catch(() => {});
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [pending, onChange]);
+
   async function upload(files: FileList | File[] | null) {
     const list = Array.from(files || []);
     if (!list.length) return;
