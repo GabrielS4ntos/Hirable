@@ -24,6 +24,7 @@ npm run dm:mock
 npm run network:accept
 npm run jobs:scan
 npm run jobs:apply
+npm run jobs:apply-one -- <record_id|job_id>
 npm run jobs:form-smoke -- 'https://www.linkedin.com/jobs/view/<id>/apply/?openSDUIApplyFlow=true'
 npm run semantic:mock
 npm run semantic:smoke
@@ -31,6 +32,11 @@ npm run gmail:auth
 npm run gmail:test
 npm run validate
 npm run storage:status
+npm test
+npm run web
+npm run web:install
+npm run web:build
+npm run web:dev
 ```
 
 First run:
@@ -44,8 +50,92 @@ First run:
 
 The browser profile is stored in `.browser-profile` under this folder.
 
+## Web console
+
+A local React interface reads and writes the same SQLite database the pipelines use.
+
+```bash
+npm run web:install   # once, installs the interface dependencies under web/
+npm run web:build     # compiles web/dist
+npm run web           # serves http://127.0.0.1:4321 and starts the scheduler
+```
+
+For interface development run `npm run web` in one terminal and `npm run web:dev` in
+another; the Vite dev server on port 4322 proxies `/api` to the agent server.
+
+The server binds to `127.0.0.1` only and rejects cross-origin browsers. It is a local
+control panel, not a service to expose on a network.
+
+Screens:
+
+- **Painel** — counters, per-pipeline status, "Executar agora" and run history.
+- **Vagas analisadas** — every analyzed item in one table with an **Enviar** button.
+- **Configurações** — scheduling mode and schedule per pipeline.
+- **Chaves de API** — Gemini and OpenRouter keys.
+
+### API keys
+
+Keys are stored in the `api_keys` table of the local SQLite file (`chmod 600`). Several
+Gemini keys can be registered and are consumed in round-robin; the OpenRouter key is the
+fallback used when every Gemini key fails with a quota error. A key can be disabled
+without deleting it, and the interface only ever shows a masked value.
+
+Database keys take precedence over `secrets/.env`. When no key is registered the agent
+falls back to `GEMINI_API_KEYS`/`GEMINI_API_KEY` and `OPENROUTER_API_KEY` as before, so
+existing setups keep working.
+
+### Pipeline scheduling
+
+Each pipeline (`dm`, `network`, `jobs`) has a row in `pipeline_schedules` with:
+
+- **mode** — `auto` (the scheduler runs it), `manual` (only from the interface) or `off`
+  (never runs, which is how you take a pipeline out of the automatic rotation).
+- **schedule_kind** — `cron` (you write the expression), `interval` (every N minutes) or
+  `daily_times` (a list of `HH:MM`).
+- **weekdays**, **window_start**/**window_end** — an extra filter applied on top of the
+  schedule, so a frequent cron still never fires outside working hours.
+- **jitter_seconds** — random delay before an automatic run.
+
+Cron accepts the standard 5 fields (`minuto hora dia mês dia-da-semana`) with `*`, ranges,
+lists, `/steps`, month/weekday names and `@daily`-style presets. The settings screen
+validates the expression while you type and previews the next five executions.
+
+The scheduler lives inside `npm run web`. It ticks every 30s, runs at most one pipeline at
+a time (they share one Chromium profile), and records every execution in `pipeline_runs`.
+Keep the server running — for example through a single launchd plist — for automatic mode
+to work.
+
+### Standardized agent records
+
+All pipelines normalize their agent output into one shape (`src/agent-record.js`) stored in
+`agent_records`, so jobs, DMs and invitations share the same table and columns in the
+interface: `title`, `subtitle`, `location`, `score`, `decision`, `confidence`, `risk_flags`,
+`reason`, `status`, `send_method` and `send_state`.
+
+`send_state` is what drives the **Enviar** button:
+
+| state | button | meaning |
+| --- | --- | --- |
+| `available` | enabled | analyzed and ready for a manual send |
+| `failed` | enabled | a previous send failed, retry is allowed |
+| `in_progress` | disabled | a send is running right now |
+| `sent_auto` | disabled | already applied by the automatic pipeline |
+| `sent_manual` | disabled | already applied from this interface |
+| `unsupported` | disabled | no automatic send method (job without Easy Apply) |
+| `blocked` | disabled | the agent or the safety rules refuse the send |
+
+Hovering a disabled button shows the exact reason. A rescan never downgrades a record that
+was already sent, so an application cannot be submitted twice.
+
+Manual sends run `jobs:apply-one`, which reuses the same Easy Apply flow, semantic memory
+and safety gates as the automatic pipeline, and respects the daily/weekly caps in
+`config.json`.
+
 Local scheduling:
 
+- `launchd/com.example.linkedin-web-console.plist.example` keeps `npm run web` alive. With
+  the console running, all scheduling is managed in the interface and the per-pipeline
+  plists below are no longer needed.
 - Generic launchd examples are available in `launchd/*.plist.example`.
 - Replace `__PROJECT_DIR__` with the absolute project directory and choose unique labels before loading them.
 - Local, machine-specific plists must not be committed.

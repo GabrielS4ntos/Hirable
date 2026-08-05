@@ -1,0 +1,159 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/*
+  Design tokens. Light and dark are both first-class: the agent runs unattended
+  overnight, so the console is dark by default but readable in daylight too.
+*/
+:root {
+  --radius: 0.625rem;
+
+  --background: oklch(0.99 0.002 250);
+  --foreground: oklch(0.21 0.02 260);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.02 260);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.02 260);
+
+  --primary: oklch(0.55 0.15 250);
+  --primary-foreground: oklch(0.99 0.005 250);
+  --secondary: oklch(0.96 0.005 250);
+  --secondary-foreground: oklch(0.3 0.02 260);
+  --muted: oklch(0.96 0.005 250);
+  --muted-foreground: oklch(0.52 0.015 260);
+  --accent: oklch(0.95 0.02 250);
+  --accent-foreground: oklch(0.3 0.03 260);
+
+  --destructive: oklch(0.58 0.2 25);
+  --destructive-foreground: oklch(0.99 0.005 250);
+  --success: oklch(0.6 0.13 155);
+  --success-foreground: oklch(0.99 0.005 250);
+  --warning: oklch(0.72 0.15 75);
+  --warning-foreground: oklch(0.24 0.03 60);
+
+  --border: oklch(0.91 0.005 250);
+  --input: oklch(0.91 0.005 250);
+  --ring: oklch(0.55 0.15 250);
+}
+
+.dark {
+  --background: oklch(0.17 0.012 260);
+  --foreground: oklch(0.95 0.006 250);
+  --card: oklch(0.21 0.014 260);
+  --card-foreground: oklch(0.95 0.006 250);
+  --popover: oklch(0.21 0.014 260);
+  --popover-foreground: oklch(0.95 0.006 250);
+
+  --primary: oklch(0.68 0.14 245);
+  --primary-foreground: oklch(0.17 0.02 260);
+  --secondary: oklch(0.27 0.016 260);
+  --secondary-foreground: oklch(0.93 0.006 250);
+  --muted: oklch(0.26 0.014 260);
+  --muted-foreground: oklch(0.68 0.012 255);
+  --accent: oklch(0.29 0.02 260);
+  --accent-foreground: oklch(0.95 0.006 250);
+
+  --destructive: oklch(0.62 0.19 25);
+  --destructive-foreground: oklch(0.98 0.005 250);
+  --success: oklch(0.68 0.14 158);
+  --success-foreground: oklch(0.17 0.02 260);
+  --warning: oklch(0.76 0.14 78);
+  --warning-foreground: oklch(0.19 0.03 60);
+
+  --border: oklch(0.3 0.015 260);
+  --input: oklch(0.32 0.015 260);
+  --ring: oklch(0.68 0.14 245);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-success: var(--success);
+  --color-success-foreground: var(--success-foreground);
+  --color-warning: var(--warning);
+  --color-warning-foreground: var(--warning-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    color-scheme: light dark;
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background-color: color-mix(in oklch, var(--primary) 30%, transparent);
+  }
+
+  /* Slim scrollbars keep dense tables from feeling cluttered. */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background-color: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
+    border-radius: 999px;
+    border: 3px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: color-mix(in oklch, var(--muted-foreground) 50%, transparent);
+  }
+}
+
+@layer utilities {
+  .animate-in-up {
+    animation: in-up 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  @keyframes in-up {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-in-up {
+      animation: none;
+    }
+  }
+}

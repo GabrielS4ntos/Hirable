@@ -1,0 +1,428 @@
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { AppStore, PIPELINE_IDS, maskSecret, normalizeDailyTimes, normalizeWeekdays } from "./app-store.js";
+import { normalizeJobRecord } from "./agent-record.js";
+
+function freshStore() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-store-"));
+  const store = new AppStore(path.join(dir, "test.sqlite"));
+  return { store, cleanup: () => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); } };
+}
+
+test("secrets are masked and never fully exposed by default", () => {
+  assert.equal(maskSecret("AIzaSyABCDEFGHIJKLMNOP"), "AIza********MNOP");
+  assert.equal(maskSecret("short"), "sh***");
+});
+
+test("api keys round-trip without leaking the secret in listings", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const id = store.createApiKey({ provider: "gemini", label: "principal", secret: "AIzaSy-primary-key" });
+    const [item] = store.listApiKeys();
+    assert.equal(item.id, id);
+    assert.equal(item.secret, undefined);
+    assert.equal(item.masked.includes("primary"), false);
+    assert.equal(item.enabled, true);
+
+    assert.equal(store.activeApiKeys("gemini")[0].secret, "AIzaSy-primary-key");
+  } finally {
+    cleanup();
+  }
+});
+
+test("disabled keys are excluded from the active rotation", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const first = store.createApiKey({ provider: "gemini", label: "a", secret: "key-aaaaaaaa" });
+    store.createApiKey({ provider: "gemini", label: "b", secret: "key-bbbbbbbb" });
+    assert.equal(store.activeApiKeys("gemini").length, 2);
+
+    store.updateApiKey(first, { enabled: false });
+    const active = store.activeApiKeys("gemini");
+    assert.equal(active.length, 1);
+    assert.equal(active[0].secret, "key-bbbbbbbb");
+  } finally {
+    cleanup();
+  }
+});
+
+test("api key validation rejects bad providers and short secrets", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    assert.throws(() => store.createApiKey({ provider: "openai", secret: "long-enough-secret" }), /provider/);
+    assert.throws(() => store.createApiKey({ provider: "gemini", secret: "tiny" }), /too short/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("updating a key without a secret keeps the stored one", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const id = store.createApiKey({ provider: "openrouter", label: "or", secret: "sk-or-original-key" });
+    store.updateApiKey(id, { label: "renomeada" });
+    assert.equal(store.activeApiKeys("openrouter")[0].secret, "sk-or-original-key");
+    assert.equal(store.listApiKeys()[0].label, "renomeada");
+  } finally {
+    cleanup();
+  }
+});
+
+test("every known pipeline gets a default manual schedule", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const schedules = store.listSchedules();
+    assert.deepEqual(schedules.map((item) => item.pipeline).sort(), [...PIPELINE_IDS].sort());
+    for (const schedule of schedules) {
+      assert.equal(schedule.mode, "manual", `${schedule.pipeline} deve comecar em manual`);
+      assert.ok(schedule.cron.length > 0);
+    }
+  } finally {
+    cleanup();
+  }
+});
+
+test("schedules accept every supported scheduling kind", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const cron = store.updateSchedule("jobs", { mode: "auto", schedule_kind: "cron", cron: "0 9 * * 1-5" });
+    assert.equal(cron.mode, "auto");
+    assert.equal(cron.cron, "0 9 * * 1-5");
+
+    const interval = store.updateSchedule("dm", { mode: "auto", schedule_kind: "interval", interval_minutes: 25 });
+    assert.equal(interval.interval_minutes, 25);
+
+    const daily = store.updateSchedule("network", {
+      mode: "auto",
+      schedule_kind: "daily_times",
+      daily_times: ["09:05", "18:00", "18:00", "bad", "9:5"]
+    });
+    assert.deepEqual(daily.daily_times, ["09:05", "18:00"]);
+  } finally {
+    cleanup();
+  }
+});
+
+test("automatic mode requires a usable schedule", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    assert.throws(() => store.updateSchedule("jobs", { mode: "auto", schedule_kind: "cron", cron: "" }), /cron/i);
+    assert.throws(
+      () => store.updateSchedule("jobs", { mode: "auto", schedule_kind: "daily_times", daily_times: [] }),
+      /horario/i
+    );
+    assert.throws(() => store.updateSchedule("jobs", { mode: "turbo" }), /mode/);
+    assert.throws(() => store.updateSchedule("inexistente", { mode: "manual" }), /unknown pipeline/);
+  } finally {
+    cleanup();
+  }
+});
+
+test("turning a pipeline off preserves its saved cron for later", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.updateSchedule("jobs", { mode: "auto", schedule_kind: "cron", cron: "30 8 * * *" });
+    const off = store.updateSchedule("jobs", { mode: "off" });
+    assert.equal(off.mode, "off");
+    assert.equal(off.cron, "30 8 * * *");
+  } finally {
+    cleanup();
+  }
+});
+
+test("interval and jitter values are clamped to sane bounds", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const high = store.updateSchedule("dm", { schedule_kind: "interval", interval_minutes: 99999, jitter_seconds: 99999 });
+    assert.equal(high.interval_minutes, 1440);
+    assert.equal(high.jitter_seconds, 3600);
+
+    const low = store.updateSchedule("dm", { interval_minutes: 0, jitter_seconds: -5 });
+    assert.equal(low.interval_minutes, 1);
+    assert.equal(low.jitter_seconds, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("runs record their lifecycle and summary", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const runId = store.startRun({ pipeline: "jobs", trigger: "manual" });
+    assert.ok(store.runningRun("jobs"));
+
+    store.finishRun(runId, { status: "success", exit_code: 0, summary: { status: "scanned", job_count: 12 } });
+    const [run] = store.listRuns({ pipeline: "jobs" });
+    assert.equal(run.status, "success");
+    assert.equal(run.summary.job_count, 12);
+    assert.ok(run.duration_ms !== null);
+    assert.equal(store.runningRun("jobs"), null);
+  } finally {
+    cleanup();
+  }
+});
+
+test("stale running executions are released", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.startRun({ pipeline: "jobs", trigger: "auto" });
+    assert.equal(store.releaseStaleRuns(-1), 1);
+    assert.equal(store.runningRun("jobs"), null);
+  } finally {
+    cleanup();
+  }
+});
+
+test("agent records upsert by identity and stay consistent across pipelines", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const job = {
+      external_id: "999",
+      title: "Engenheiro",
+      company: "Acme",
+      location: "Remoto",
+      url: "https://linkedin.com/jobs/view/999/",
+      apply_url: "https://linkedin.com/jobs/view/999/apply/",
+      easy_apply: true,
+      search_name: "busca"
+    };
+    const record = normalizeJobRecord(job, null, { score: 75 });
+    store.upsertAgentRecord(record);
+    store.upsertAgentRecord(normalizeJobRecord({ ...job, title: "Engenheiro Senior" }, null, { score: 80 }));
+
+    const { items, total } = store.listAgentRecords({ kind: "job" });
+    assert.equal(total, 1);
+    assert.equal(items[0].title, "Engenheiro Senior");
+    assert.equal(items[0].score, 80);
+    assert.equal(items[0].raw.job.external_id, "999");
+  } finally {
+    cleanup();
+  }
+});
+
+test("a rescan never downgrades an already sent record", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const job = { external_id: "1", title: "X", easy_apply: true, url: "u", apply_url: "a" };
+    store.upsertAgentRecord(normalizeJobRecord(job, null, {}));
+    const record = store.listAgentRecords({ kind: "job" }).items[0];
+
+    store.setSendState(record.record_id, { send_state: "sent_manual", sent_by: "manual" });
+    // A later scan sees the job again and would normally mark it "available".
+    store.upsertAgentRecord(normalizeJobRecord(job, null, {}));
+
+    const after = store.getAgentRecord(record.record_id);
+    assert.equal(after.send_state, "sent_manual");
+    assert.equal(after.sent_by, "manual");
+    assert.ok(after.sent_at);
+    assert.equal(after.status, "sent");
+  } finally {
+    cleanup();
+  }
+});
+
+test("records can be filtered by state and searched by text", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.upsertAgentRecord(normalizeJobRecord(
+      { external_id: "1", title: "AI Engineer", company: "Acme", easy_apply: true }, null, {}
+    ));
+    store.upsertAgentRecord(normalizeJobRecord(
+      { external_id: "2", title: "Backend Dev", company: "Globex", easy_apply: false }, null, {}
+    ));
+
+    assert.equal(store.listAgentRecords({ kind: "job", sendState: "available" }).total, 1);
+    assert.equal(store.listAgentRecords({ kind: "job", sendState: "unsupported" }).total, 1);
+    assert.equal(store.listAgentRecords({ kind: "job", search: "globex" }).total, 1);
+    assert.equal(store.listAgentRecords({ kind: "job", search: "ENGINEER" }).total, 1);
+
+    const counts = store.agentRecordCounts("job");
+    assert.equal(counts.available, 1);
+    assert.equal(counts.unsupported, 1);
+  } finally {
+    cleanup();
+  }
+});
+
+test("settings store arbitrary JSON values", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.setSetting("ui.rows_per_page", 50);
+    store.setSetting("ui.filters", { kind: "job" });
+    assert.equal(store.getSetting("ui.rows_per_page"), 50);
+    assert.deepEqual(store.getSetting("ui.filters"), { kind: "job" });
+    assert.equal(store.getSetting("missing", "fallback"), "fallback");
+  } finally {
+    cleanup();
+  }
+});
+
+test("the rate limit allows a burst and then blocks", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const now = Date.parse("2026-08-05T10:00:00.000Z");
+    const options = { capacity: 3, refillPerSecond: 1 / 30, now };
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+      assert.equal(store.consumeRateLimit("extract", options).allowed, true, `tentativa ${attempt + 1}`);
+    }
+    const blocked = store.consumeRateLimit("extract", options);
+    assert.equal(blocked.allowed, false);
+    assert.ok(blocked.retry_after_seconds > 0 && blocked.retry_after_seconds <= 30);
+  } finally {
+    cleanup();
+  }
+});
+
+test("the rate limit refills over time and caps at capacity", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const start = Date.parse("2026-08-05T10:00:00.000Z");
+    const options = (now) => ({ capacity: 3, refillPerSecond: 1 / 30, now });
+
+    for (let attempt = 0; attempt < 3; attempt++) store.consumeRateLimit("extract", options(start));
+    assert.equal(store.consumeRateLimit("extract", options(start)).allowed, false);
+
+    // 30s later exactly one token is back.
+    assert.equal(store.consumeRateLimit("extract", options(start + 30_000)).allowed, true);
+    assert.equal(store.consumeRateLimit("extract", options(start + 30_000)).allowed, false);
+
+    // After a long idle period the bucket is full again, but never above capacity.
+    const later = start + 3_600_000;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      assert.equal(store.consumeRateLimit("extract", options(later)).allowed, true, `pos-espera ${attempt + 1}`);
+    }
+    assert.equal(store.consumeRateLimit("extract", options(later)).allowed, false);
+  } finally {
+    cleanup();
+  }
+});
+
+test("rate limit buckets are independent per key", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const options = { capacity: 1, refillPerSecond: 1 / 60, now: Date.now() };
+    assert.equal(store.consumeRateLimit("a", options).allowed, true);
+    assert.equal(store.consumeRateLimit("a", options).allowed, false);
+    assert.equal(store.consumeRateLimit("b", options).allowed, true);
+  } finally {
+    cleanup();
+  }
+});
+
+test("the rate limit survives reopening the database", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-store-"));
+  const file = path.join(dir, "test.sqlite");
+  try {
+    const now = Date.parse("2026-08-05T10:00:00.000Z");
+    const options = { capacity: 2, refillPerSecond: 1 / 60, now };
+
+    const first = new AppStore(file);
+    first.consumeRateLimit("extract", options);
+    first.consumeRateLimit("extract", options);
+    first.close();
+
+    // A restart must not hand out a fresh bucket.
+    const second = new AppStore(file);
+    assert.equal(second.consumeRateLimit("extract", options).allowed, false);
+    second.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("onboarding starts incomplete and is marked complete on save", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    assert.equal(store.isOnboardingComplete(), false);
+    assert.equal(store.getUserProfile().resume_text, "");
+
+    store.saveUserProfile({ resume_text: "Curriculo do Gabriel", profile: { identity: { full_name: "Gabriel" } } });
+    assert.equal(store.isOnboardingComplete(), false, "salvar rascunho nao conclui o onboarding");
+
+    store.saveUserProfile({ complete_onboarding: true });
+    assert.equal(store.isOnboardingComplete(), true);
+    assert.ok(store.getUserProfile().onboarding_completed_at);
+  } finally {
+    cleanup();
+  }
+});
+
+test("the profile cache is invalidated on every write", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.saveUserProfile({ profile: { identity: { full_name: "Ana" } } });
+    assert.equal(store.getUserProfile().profile.identity.full_name, "Ana");
+
+    store.saveUserProfile({ profile: { identity: { full_name: "Bruno" } } });
+    assert.equal(store.getUserProfile().profile.identity.full_name, "Bruno");
+  } finally {
+    cleanup();
+  }
+});
+
+test("partial saves keep the fields that were not sent", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.saveUserProfile({ resume_text: "texto original", profile: { identity: { full_name: "Ana" } } });
+    store.saveUserProfile({ profile: { identity: { full_name: "Ana Maria" } } });
+
+    const stored = store.getUserProfile();
+    assert.equal(stored.resume_text, "texto original");
+    assert.equal(stored.profile.identity.full_name, "Ana Maria");
+  } finally {
+    cleanup();
+  }
+});
+
+test("completing the onboarding twice keeps the first timestamp", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    const first = store.saveUserProfile({ complete_onboarding: true }).onboarding_completed_at;
+    const second = store.saveUserProfile({ complete_onboarding: true }).onboarding_completed_at;
+    assert.equal(first, second);
+  } finally {
+    cleanup();
+  }
+});
+
+test("resetting the onboarding keeps the profile data", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.saveUserProfile({ resume_text: "curriculo", profile: { identity: { full_name: "Ana" } }, complete_onboarding: true });
+    store.resetOnboarding();
+
+    const stored = store.getUserProfile();
+    assert.equal(stored.onboarding_complete, false);
+    assert.equal(stored.resume_text, "curriculo");
+    assert.equal(stored.profile.identity.full_name, "Ana");
+  } finally {
+    cleanup();
+  }
+});
+
+test("the profile survives reopening the database", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-store-"));
+  const file = path.join(dir, "test.sqlite");
+  try {
+    const first = new AppStore(file);
+    first.saveUserProfile({ resume_text: "curriculo", profile: { identity: { full_name: "Ana" } }, complete_onboarding: true });
+    first.close();
+
+    const second = new AppStore(file);
+    assert.equal(second.isOnboardingComplete(), true);
+    assert.equal(second.getUserProfile().profile.identity.full_name, "Ana");
+    second.close();
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("weekday and daily time normalization reject junk input", () => {
+  assert.deepEqual(normalizeWeekdays([5, 1, 1, 9, -2]), [1, 5]);
+  assert.deepEqual(normalizeWeekdays([]), [0, 1, 2, 3, 4, 5, 6]);
+  assert.deepEqual(normalizeDailyTimes("08:00, 25:00, 7:5, 07:05"), ["07:05", "08:00"]);
+});

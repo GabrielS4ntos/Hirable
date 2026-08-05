@@ -12,3 +12,5 @@ data/
 .run.lock
 .DS_Store
 launchd/*.plist
+web/node_modules/
+web/dist/
