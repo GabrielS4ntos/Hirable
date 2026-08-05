@@ -10,17 +10,19 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/components/ui/toast";
+import { configFieldLabel, localizedError, useI18n, type Translate } from "@/lib/i18n";
 
 /** Groups, so a flat list of 30 knobs reads as a settings screen. */
-const GROUPS: { prefix: string; label: string; description?: string }[] = [
-  { prefix: "jobs_watcher.searches", label: "Buscas de vagas", description: "As URLs de busca do LinkedIn que o pipeline percorre." },
-  { prefix: "jobs_watcher", label: "Vagas e candidaturas" },
-  { prefix: "dm_watcher", label: "Mensagens diretas" },
-  { prefix: "network_invites", label: "Convites de rede" },
-  { prefix: "model_gate", label: "Modelos" },
-  { prefix: "calendar", label: "Agenda" },
-  { prefix: "browser", label: "Navegador" },
-  { prefix: "timezone", label: "Geral" }
+const GROUPS: { prefix: string; labelKey: Parameters<Translate>[0]; descriptionKey?: Parameters<Translate>[0] }[] = [
+  { prefix: "pause", labelKey: "pause.group", descriptionKey: "pause.groupDescription" },
+  { prefix: "jobs_watcher.searches", labelKey: "settings.searches", descriptionKey: "settings.searchesDescription" },
+  { prefix: "jobs_watcher", labelKey: "settings.jobs" },
+  { prefix: "dm_watcher", labelKey: "settings.dms" },
+  { prefix: "network_invites", labelKey: "settings.invites" },
+  { prefix: "model_gate", labelKey: "settings.models" },
+  { prefix: "calendar", labelKey: "settings.calendar" },
+  { prefix: "browser", labelKey: "settings.browser" },
+  { prefix: "timezone", labelKey: "settings.general" }
 ];
 
 function groupOf(path: string) {
@@ -33,6 +35,7 @@ function groupOf(path: string) {
  */
 export function GeneralSettingsCard() {
   const toast = useToast();
+  const { t, locale } = useI18n();
   const config = usePolling(api.getConfig, 0);
   const [draft, setDraft] = React.useState<Record<string, any>>({});
   const [saving, setSaving] = React.useState(false);
@@ -51,15 +54,15 @@ export function GeneralSettingsCard() {
       setDraft({});
       if (result.rejected.length) {
         toast({
-          title: `${result.applied.length} salvos, ${result.rejected.length} recusados`,
-          description: result.rejected.map((item) => item.error).join(" · "),
+          title: t("settings.partial", { applied: result.applied.length, rejected: result.rejected.length }),
+          description: result.rejected.map((item) => locale === "pt-BR" ? item.error : item.path).join(" · "),
           variant: "error"
         });
       } else {
-        toast({ title: "Configuração salva", description: "Vale para a próxima execução.", variant: "success" });
+        toast({ title: t("settings.saved"), description: t("settings.savedDescription"), variant: "success" });
       }
     } catch (error) {
-      toast({ title: "Erro ao salvar", description: (error as Error).message, variant: "error" });
+      toast({ title: t("settings.saveError"), description: localizedError(error, t, locale), variant: "error" });
     } finally {
       setSaving(false);
     }
@@ -76,16 +79,15 @@ export function GeneralSettingsCard() {
         <div className="space-y-1">
           <CardTitle className="flex items-center gap-2">
             <SlidersHorizontal className="size-4" />
-            Comportamento dos pipelines
+            {t("settings.pipelineBehavior")}
           </CardTitle>
           <CardDescription>
-            Tudo o que antes exigia editar <code className="font-mono text-xs">config.json</code>. Os limites máximos e as
-            regras de segurança ficam no código e não são editáveis aqui.
+            {t("settings.pipelineBehaviorDescription")}
           </CardDescription>
         </div>
         <Button size="sm" onClick={save} disabled={!dirtyPaths.length || saving}>
           {saving ? <Loader2 className="animate-spin" /> : <Save />}
-          Salvar {dirtyPaths.length ? `(${dirtyPaths.length})` : ""}
+          {t("common.save")} {dirtyPaths.length ? `(${dirtyPaths.length})` : ""}
         </Button>
       </CardHeader>
 
@@ -100,8 +102,8 @@ export function GeneralSettingsCard() {
           <section key={group.prefix} className="space-y-3">
             {index > 0 ? <Separator /> : null}
             <div>
-              <h4 className="text-sm font-semibold">{group.label}</h4>
-              {group.description ? <p className="text-xs text-muted-foreground">{group.description}</p> : null}
+              <h4 className="text-sm font-semibold">{t(group.labelKey)}</h4>
+              {group.descriptionKey ? <p className="text-xs text-muted-foreground">{t(group.descriptionKey)}</p> : null}
             </div>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -110,13 +112,13 @@ export function GeneralSettingsCard() {
                 return (
                   <div key={field.path} className={cn("space-y-1.5", wide && "sm:col-span-2")}>
                     <Label htmlFor={field.path} className="flex items-center gap-2">
-                      {field.label}
+                      {configFieldLabel(field.path, field.label, locale)}
                       {field.path in draft ? <span className="size-1.5 rounded-full bg-primary" /> : null}
                     </Label>
-                    <ConfigControl field={field} value={valueOf(field)} onChange={(next) => update(field.path, next)} />
+                    <ConfigControl field={field} value={valueOf(field)} onChange={(next) => update(field.path, next)} t={t} locale={locale} />
                     {field.type === "int" ? (
                       <p className="text-xs text-muted-foreground">
-                        entre {field.min} e {field.max}
+                        {t("settings.range", { min: field.min ?? "", max: field.max ?? "" })}
                       </p>
                     ) : null}
                   </div>
@@ -126,11 +128,20 @@ export function GeneralSettingsCard() {
           </section>
         ))}
 
+        {fields.some((field) => field.path === "pause.enabled") ? (
+          <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            {Boolean(valueOf(fields.find((field) => field.path === "pause.enabled")!))
+              ? t(Boolean(valueOf(fields.find((field) => field.path === "pause.allow_manual_runs")!)) ? "pause.summaryAllowed" : "pause.summaryBlocked", {
+                  start: String(valueOf(fields.find((field) => field.path === "pause.start")!)),
+                  end: String(valueOf(fields.find((field) => field.path === "pause.end")!))
+                })
+              : t("pause.summaryDisabled")}
+          </p>
+        ) : null}
+
         {config.data?.legacy_config_file ? (
           <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            Um <code className="font-mono">config.json</code> ainda existe na pasta do projeto. Ele já foi importado
-            {config.data.imported_at ? " para o banco" : ""} e agora é opcional — as alterações feitas aqui têm
-            prioridade sobre ele.
+            {t("settings.legacy", { database: config.data.imported_at ? t("settings.toDatabase") : "" })}
           </p>
         ) : null}
       </CardContent>
@@ -141,17 +152,21 @@ export function GeneralSettingsCard() {
 function ConfigControl({
   field,
   value,
-  onChange
+  onChange,
+  t,
+  locale
 }: {
   field: ConfigField;
   value: any;
   onChange: (value: any) => void;
+  t: Translate;
+  locale: "pt-BR" | "en";
 }) {
   switch (field.type) {
     case "boolean":
       return (
         <div className="flex h-9 items-center">
-          <Switch checked={Boolean(value)} onCheckedChange={onChange} aria-label={field.label} />
+          <Switch checked={Boolean(value)} onCheckedChange={onChange} aria-label={configFieldLabel(field.path, field.label, locale)} />
         </div>
       );
 
@@ -167,14 +182,17 @@ function ConfigControl({
         />
       );
 
+    case "clock":
+      return <Input id={field.path} type="time" value={value ?? ""} onChange={(event) => onChange(event.target.value)} />;
+
     case "searches":
-      return <SearchesControl value={Array.isArray(value) ? value : []} onChange={onChange} />;
+      return <SearchesControl value={Array.isArray(value) ? value : []} onChange={onChange} t={t} />;
 
     case "known_answers":
-      return <KnownAnswersControl value={Array.isArray(value) ? value : []} onChange={onChange} />;
+      return <KnownAnswersControl value={Array.isArray(value) ? value : []} onChange={onChange} t={t} />;
 
     case "string_map":
-      return <StringMapControl value={value || {}} onChange={onChange} />;
+      return <StringMapControl value={value || {}} onChange={onChange} t={t} />;
 
     default:
       return <Input id={field.path} value={value ?? ""} onChange={(event) => onChange(event.target.value)} />;
@@ -183,10 +201,12 @@ function ConfigControl({
 
 function SearchesControl({
   value,
-  onChange
+  onChange,
+  t
 }: {
   value: { name: string; url: string }[];
   onChange: (value: { name: string; url: string }[]) => void;
+  t: Translate;
 }) {
   const update = (index: number, patch: Partial<{ name: string; url: string }>) =>
     onChange(value.map((item, position) => (position === index ? { ...item, ...patch } : item)));
@@ -212,7 +232,7 @@ function SearchesControl({
             size="icon"
             onClick={() => onChange(value.filter((_, position) => position !== index))}
             className="text-muted-foreground hover:text-destructive"
-            aria-label={`Remover ${item.name}`}
+            aria-label={t("settings.removeSearch", { name: item.name })}
           >
             <Trash2 />
           </Button>
@@ -220,7 +240,7 @@ function SearchesControl({
       ))}
       <Button variant="outline" size="sm" onClick={() => onChange([...value, { name: "", url: "" }])}>
         <Search />
-        Adicionar busca
+        {t("settings.addSearch")}
       </Button>
     </div>
   );
@@ -228,10 +248,12 @@ function SearchesControl({
 
 function KnownAnswersControl({
   value,
-  onChange
+  onChange,
+  t
 }: {
   value: { pattern: string; value: string }[];
   onChange: (value: { pattern: string; value: string }[]) => void;
+  t: Translate;
 }) {
   const update = (index: number, patch: Partial<{ pattern: string; value: string }>) =>
     onChange(value.map((item, position) => (position === index ? { ...item, ...patch } : item)));
@@ -239,20 +261,20 @@ function KnownAnswersControl({
   return (
     <div className="space-y-2">
       <p className="text-xs text-muted-foreground">
-        Respostas determinísticas do Easy Apply: o padrão casa com o rótulo do campo, o valor é preenchido.
+        {t("settings.knownAnswersHelp")}
       </p>
       {value.map((item, index) => (
         <div key={index} className="flex flex-wrap items-start gap-2">
           <Input
             value={item.pattern}
             onChange={(event) => update(index, { pattern: event.target.value })}
-            placeholder="regex do rótulo"
+            placeholder={t("settings.labelRegex")}
             className="min-w-56 flex-1 font-mono text-xs"
           />
           <Input
             value={item.value}
             onChange={(event) => update(index, { value: event.target.value })}
-            placeholder="resposta"
+            placeholder={t("settings.answer")}
             className="max-w-56"
           />
           <Button
@@ -260,7 +282,7 @@ function KnownAnswersControl({
             size="icon"
             onClick={() => onChange(value.filter((_, position) => position !== index))}
             className="text-muted-foreground hover:text-destructive"
-            aria-label="Remover resposta"
+            aria-label={t("settings.removeAnswer")}
           >
             <Trash2 />
           </Button>
@@ -268,7 +290,7 @@ function KnownAnswersControl({
       ))}
       <Button variant="outline" size="sm" onClick={() => onChange([...value, { pattern: "", value: "" }])}>
         <Plus />
-        Adicionar resposta
+        {t("settings.addAnswer")}
       </Button>
     </div>
   );
@@ -276,10 +298,12 @@ function KnownAnswersControl({
 
 function StringMapControl({
   value,
-  onChange
+  onChange,
+  t
 }: {
   value: Record<string, string>;
   onChange: (value: Record<string, string>) => void;
+  t: Translate;
 }) {
   const entries = Object.entries(value);
   const [draftKey, setDraftKey] = React.useState("");
@@ -304,15 +328,15 @@ function StringMapControl({
               onChange(next);
             }}
             className="text-muted-foreground hover:text-destructive"
-            aria-label={`Remover ${key}`}
+            aria-label={`${t("common.remove")} ${key}`}
           >
             <Trash2 />
           </Button>
         </div>
       ))}
       <div className="flex items-center gap-2">
-        <Input value={draftKey} onChange={(event) => setDraftKey(event.target.value)} placeholder="chave" className="max-w-48 font-mono text-xs" />
-        <Input value={draftValue} onChange={(event) => setDraftValue(event.target.value)} placeholder="valor" className="flex-1" />
+        <Input value={draftKey} onChange={(event) => setDraftKey(event.target.value)} placeholder={t("settings.key")} className="max-w-48 font-mono text-xs" />
+        <Input value={draftValue} onChange={(event) => setDraftValue(event.target.value)} placeholder={t("settings.value")} className="flex-1" />
         <Button
           variant="outline"
           size="sm"

@@ -13,13 +13,14 @@ import { SettingsPage } from "@/pages/SettingsPage";
 import { KeysPage } from "@/pages/KeysPage";
 import { ProfilePage } from "@/pages/ProfilePage";
 import { OnboardingPage } from "@/pages/OnboardingPage";
+import { LanguageProvider, pipelineLabel, useI18n } from "@/lib/i18n";
 
 const NAV = [
-  { id: "painel", label: "Painel", icon: Activity, Component: DashboardPage },
-  { id: "vagas", label: "Vagas analisadas", icon: Briefcase, Component: JobsPage },
-  { id: "perfil", label: "Perfil", icon: UserRound, Component: ProfilePage },
-  { id: "configuracoes", label: "Configurações", icon: Settings2, Component: SettingsPage },
-  { id: "chaves", label: "Chaves de API", icon: KeyRound, Component: KeysPage }
+  { id: "painel", labelKey: "nav.dashboard", icon: Activity, Component: DashboardPage },
+  { id: "vagas", labelKey: "nav.jobs", icon: Briefcase, Component: JobsPage },
+  { id: "perfil", labelKey: "nav.profile", icon: UserRound, Component: ProfilePage },
+  { id: "configuracoes", labelKey: "nav.settings", icon: Settings2, Component: SettingsPage },
+  { id: "chaves", labelKey: "nav.keys", icon: KeyRound, Component: KeysPage }
 ] as const;
 
 type RouteId = (typeof NAV)[number]["id"];
@@ -53,16 +54,19 @@ function useTheme() {
 
 export function App() {
   return (
-    <ToastProvider>
-      <ProfileProvider>
-        <AppShell />
-      </ProfileProvider>
-    </ToastProvider>
+    <LanguageProvider>
+      <ToastProvider>
+        <ProfileProvider>
+          <AppShell />
+        </ProfileProvider>
+      </ToastProvider>
+    </LanguageProvider>
   );
 }
 
 function AppShell() {
   const [route, navigate] = useHashRoute();
+  const { locale, setLocale, t } = useI18n();
   const { theme, toggle } = useTheme();
   const { onboardingComplete, loading: profileLoading } = useProfile();
   // Polling only starts once onboarding is done: nothing runs before that anyway.
@@ -97,12 +101,12 @@ function AppShell() {
                 </div>
                 <div className="leading-tight">
                   <p className="text-sm font-semibold">LinkedIn Agent</p>
-                  <p className="text-xs text-muted-foreground">console local</p>
+                  <p className="text-xs text-muted-foreground">{t("app.localConsole")}</p>
                 </div>
               </div>
               <button
                 onClick={toggle}
-                aria-label="Alternar tema"
+                aria-label={t("app.toggleTheme")}
                 className="grid size-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
               >
                 {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
@@ -125,7 +129,7 @@ function AppShell() {
                     )}
                   >
                     <Icon className="size-4 shrink-0" />
-                    {item.label}
+                    {t(item.labelKey)}
                   </button>
                 );
               })}
@@ -139,7 +143,11 @@ function AppShell() {
                     status.error ? "bg-destructive" : running ? "animate-pulse bg-warning" : "bg-success"
                   )}
                 />
-                {status.error ? "servidor offline" : running ? `executando ${running.pipeline}` : "scheduler ocioso"}
+                {status.error
+                  ? t("app.serverOffline")
+                  : running
+                    ? t("app.runningPipeline", { pipeline: pipelineLabel(running.pipeline, running.pipeline, locale) })
+                    : t("app.schedulerIdle")}
               </div>
               {status.data ? <p className="font-mono">{status.data.timezone}</p> : null}
             </div>
@@ -148,22 +156,41 @@ function AppShell() {
           <main className="min-w-0 flex-1">
             <header className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-6 py-4">
               <div>
-                <h1 className="text-lg font-semibold tracking-tight">{active.label}</h1>
+                <h1 className="text-lg font-semibold tracking-tight">{t(active.labelKey)}</h1>
                 <p className="text-xs text-muted-foreground">
                   {status.data
-                    ? `${status.data.keys.gemini} chave(s) Gemini · ${status.data.keys.openrouter} OpenRouter · fallback ${status.data.model_gate.fallback_provider ?? "desativado"}`
-                    : "carregando…"}
+                    ? t("app.keySummary", {
+                        gemini: status.data.keys.gemini,
+                        openrouter: status.data.keys.openrouter,
+                        fallback: status.data.model_gate.fallback_provider ?? t("common.disabled")
+                      })
+                    : t("app.loading")}
                 </p>
               </div>
               <div className="flex items-center gap-2">
+                <div className="flex rounded-md border border-border p-0.5" aria-label={t("language.label")}>
+                  {(["pt-BR", "en"] as const).map((option) => (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => setLocale(option)}
+                      className={cn(
+                        "rounded px-2 py-1 text-xs font-medium transition-colors",
+                        locale === option ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      {option === "pt-BR" ? "PT" : "EN"}
+                    </button>
+                  ))}
+                </div>
                 {running ? (
                   <Badge variant="warning" className="gap-1.5">
                     <span className="size-1.5 animate-pulse rounded-full bg-current" />
-                    {running.pipeline} em execução
+                    {t("app.running", { pipeline: pipelineLabel(running.pipeline, running.pipeline, locale) })}
                   </Badge>
                 ) : null}
                 {status.data?.scheduler.queued.length ? (
-                  <Badge variant="secondary">{status.data.scheduler.queued.length} na fila</Badge>
+                  <Badge variant="secondary">{t("app.queued", { count: status.data.scheduler.queued.length })}</Badge>
                 ) : null}
               </div>
             </header>

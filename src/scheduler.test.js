@@ -148,3 +148,42 @@ test("a stale schedule error is cleared once the schedule resolves again", () =>
     cleanup();
   }
 });
+
+test("global pause moves an automatic next run to the first allowed slot", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.updateSchedule("jobs", {
+      mode: "auto",
+      schedule_kind: "daily_times",
+      daily_times: ["03:00", "09:00"],
+      weekdays: [0, 1, 2, 3, 4, 5, 6],
+      window_start: "",
+      window_end: ""
+    });
+    const config = {
+      timezone: "America/Sao_Paulo",
+      pause: { enabled: true, start: "22:00", end: "08:00", allow_manual_runs: true }
+    };
+    const scheduler = new Scheduler(store, { tickMs: 0, getConfig: () => config });
+    scheduler.refreshNextRun("jobs", new Date("2026-08-05T05:00:00Z"));
+    assert.equal(store.getSchedule("jobs").next_run_at, "2026-08-05T12:00:00.000Z");
+  } finally {
+    cleanup();
+  }
+});
+
+test("manual queueing obeys the pause preference before creating a run", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.updateSchedule("jobs", { mode: "manual" });
+    const config = {
+      timezone: "America/Sao_Paulo",
+      pause: { enabled: true, start: "00:00", end: "23:59", allow_manual_runs: false }
+    };
+    const scheduler = new Scheduler(store, { tickMs: 0, getConfig: () => config });
+    assert.throws(() => scheduler.enqueue("jobs", "force"), (error) => error.code === "pause_active");
+    assert.equal(store.runningRun("jobs"), null);
+  } finally {
+    cleanup();
+  }
+});

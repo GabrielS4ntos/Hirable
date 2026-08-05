@@ -7,11 +7,14 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { google } from "googleapis";
 import { AppStore, PIPELINES } from "../app-store.js";
+import { PROVIDERS } from "../providers.js";
 import { describeSchedule, isValidCron, nextRunForSchedule } from "../cron.js";
 import { Scheduler } from "../scheduler.js";
+import { nextRunOutsidePause, pauseStatus, validatePauseConfig } from "../pause.js";
 import { PROFILE_SECTIONS, declaredDemographics, normalizeProfile, profileCompleteness } from "../profile-schema.js";
-import { bootstrapDatabasePath, importLegacyConfig, legacyConfigExists, resolveConfig } from "../config.js";
+import { bootstrapDatabasePath, importLegacyConfig, legacyConfigExists, migratePauseConfigV1, migrateProviderRolesV1, resolveConfig } from "../config.js";
 import { EDITABLE, coerceEditable, getPath, setPath } from "../config-defaults.js";
+import { extractDocumentText } from "../document-text.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), "..", "..");
@@ -38,9 +41,11 @@ function readConfig(store = null) {
 }
 
 class HttpError extends Error {
-  constructor(status, message) {
+  constructor(status, message, code = "request_failed", params = {}) {
     super(message);
     this.status = status;
+    this.code = code;
+    this.params = params;
   }
 }
 
@@ -77,10 +82,11 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
   /* ------------------------------------------------------------------ status */
 
   route("GET", /^\/api\/status$/, () => {
+    const config = getConfig();
     const schedules = store.listSchedules().map((schedule) => ({
       ...schedule,
       summary: describeSchedule(schedule),
-      next_run_preview: nextRunForSchedule(schedule).next_run_at
+      next_run_preview: nextRunOutsidePause(schedule, config).next_run_at
     }));
     const geminiKeys = store.activeApiKeys("gemini").length;
     const openrouterKeys = store.activeApiKeys("openrouter").length;
@@ -88,7 +94,8 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
     const onboardingComplete = store.isOnboardingComplete();
     return {
       now: new Date().toISOString(),
-      timezone: getConfig().timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      timezone: config.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+      pause: pauseStatus(config),
       onboarding: { complete: onboardingComplete },
       scheduler: scheduler.status(),
       schedules,
@@ -99,6 +106,14 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
         invite: store.agentRecordCounts("invite")
       },
       keys: { gemini: geminiKeys, openrouter: openrouterKeys },
+      // Roles drive routing; the interface uses this to gate model-backed actions.
+      providers: store.listProviders().map((provider) => ({
+        id: provider.id,
+        label: provider.label,
+        role: provider.role,
+        model: provider.model,
+        configured: provider.configured
+      })),
       model_gate: {
         provider: getConfig().model_gate?.provider || null,
         job_model: getConfig().model_gate?.job_model || null,
@@ -267,20 +282,136 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
     }
   });
 
+  /* -------------------------------------------------------------- resumes */
+
+  const resumesDir = () => path.resolve(ROOT, path.dirname(bootstrapDatabasePath()), "resumes");
+
+  route("GET", /^\/api\/resumes$/, () => ({ items: store.listResumes() }));
+
+  /**
+   * Uploads a résumé. The file is written to disk untouched — that is the copy
+   * attached to emails — and only the extracted text is sent to the indexing
+   * agent, once, so job matching later costs no model call at all.
+   */
+  route("POST", /^\/api\/resumes$/, async (req) => {
+    const body = await readBody(req, 20_000_000);
+    const originalName = String(body.filename || "").trim().replace(/[/\\]/g, "").slice(0, 200);
+    if (!originalName) throw new HttpError(400, "informe o nome do arquivo");
+    if (!body.content_base64) throw new HttpError(400, "arquivo vazio");
+
+    const content = Buffer.from(String(body.content_base64), "base64");
+    if (!content.length) throw new HttpError(400, "arquivo vazio");
+    if (content.length > 10 * 1024 * 1024) throw new HttpError(413, "o arquivo passa de 10 MB");
+
+    const extension = originalName.includes(".") ? originalName.split(".").pop().toLowerCase() : "bin";
+    const storedName = `${crypto.randomBytes(12).toString("hex")}.${extension}`;
+    await fsp.mkdir(resumesDir(), { recursive: true });
+    await fsp.writeFile(path.join(resumesDir(), storedName), content, { mode: 0o600 });
+
+    const id = store.createResume({
+      label: body.label || originalName.replace(/\.[^.]+$/, ""),
+      original_name: originalName,
+      stored_name: storedName,
+      mime_type: String(body.mime_type || "").slice(0, 120),
+      size_bytes: content.length
+    });
+
+    // Index in the background: the upload must not wait on a model call.
+    const extracted = extractDocumentText(content, originalName);
+    if (!extracted.extracted) {
+      store.setResumeIndex(id, { error: extracted.reason });
+    } else {
+      runCliJson("resume:index", [id], { input: extracted.text, timeoutMs: 120_000 })
+        .catch((error) => store.setResumeIndex(id, { error: error.message }));
+    }
+
+    return { id, items: store.listResumes(), extraction: { kind: extracted.kind, extracted: extracted.extracted, reason: extracted.reason } };
+  });
+
+  route("PATCH", /^\/api\/resumes\/([\w-]+)$/, async (req, res, [id]) => {
+    const body = await readBody(req);
+    try {
+      store.updateResume(id, body);
+    } catch (error) {
+      throw new HttpError(404, error.message);
+    }
+    return { items: store.listResumes() };
+  });
+
+  route("DELETE", /^\/api\/resumes\/([\w-]+)$/, async (req, res, [id]) => {
+    const removed = store.deleteResume(id);
+    if (!removed) throw new HttpError(404, "currículo não encontrado");
+    await fsp.rm(path.join(resumesDir(), removed.stored_name), { force: true }).catch(() => {});
+    return { items: store.listResumes() };
+  });
+
+  /** Re-runs the indexing agent for a résumé already on disk. */
+  route("POST", /^\/api\/resumes\/([\w-]+)\/reindex$/, async (req, res, [id]) => {
+    const resume = store.getResume(id);
+    if (!resume) throw new HttpError(404, "currículo não encontrado");
+
+    const limit = store.consumeRateLimit("resume_index", { capacity: 5, refillPerSecond: 1 / 30 });
+    if (!limit.allowed) throw new HttpError(429, `Aguarde ${limit.retry_after_seconds}s antes de reindexar`);
+
+    const content = await fsp.readFile(path.join(resumesDir(), resume.stored_name)).catch(() => null);
+    if (!content) throw new HttpError(410, "o arquivo não está mais no disco");
+
+    const extracted = extractDocumentText(content, resume.original_name);
+    if (!extracted.extracted) {
+      store.setResumeIndex(id, { error: extracted.reason });
+      throw new HttpError(422, extracted.reason);
+    }
+
+    try {
+      await runCliJson("resume:index", [id], { input: extracted.text, timeoutMs: 120_000 });
+    } catch (error) {
+      throw new HttpError(502, `Falha ao indexar: ${error.message}`);
+    }
+    return { items: store.listResumes() };
+  });
+
+  /* ------------------------------------------------------------- providers */
+
+  route("GET", /^\/api\/providers$/, () => ({
+    items: store.listProviders(),
+    catalog: PROVIDERS
+  }));
+
+  route("PUT", /^\/api\/providers\/([\w-]+)$/, async (req, res, [provider]) => {
+    const body = await readBody(req);
+    try {
+      if (body.model !== undefined) store.setProviderModel(provider, body.model);
+      if (body.role !== undefined) store.setProviderRole(provider, body.role);
+      return { items: store.listProviders() };
+    } catch (error) {
+      throw new HttpError(400, error.message);
+    }
+  });
+
   /* -------------------------------------------------------------- api keys */
 
   route("GET", /^\/api\/keys$/, () => ({ items: store.listApiKeys() }));
 
   route("POST", /^\/api\/keys$/, async (req) => {
     const body = await readBody(req);
-    const id = store.createApiKey({
-      provider: body.provider,
-      label: body.label,
-      secret: body.secret,
-      enabled: body.enabled !== false,
-      priority: body.priority
-    });
-    return { id, items: store.listApiKeys() };
+    let id;
+    try {
+      id = store.createApiKey({
+        provider: body.provider,
+        label: body.label,
+        secret: body.secret,
+        enabled: body.enabled !== false,
+        priority: body.priority
+      });
+    } catch (error) {
+      throw new HttpError(400, error.message);
+    }
+
+    if (body.model) store.setProviderModel(body.provider, body.model);
+    // The first provider configured becomes primary; the second, the fallback.
+    store.settleProviderRoles(body.provider, { makePrimary: Boolean(body.make_primary) });
+
+    return { id, items: store.listApiKeys(), providers: store.listProviders() };
   });
 
   route("PATCH", /^\/api\/keys\/([\w-]+)$/, async (req, res, [id]) => {
@@ -301,8 +432,8 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
     items: store.listSchedules().map((schedule) => ({
       ...schedule,
       summary: describeSchedule(schedule),
-      next_run_preview: nextRunForSchedule(schedule).next_run_at,
-      schedule_error: nextRunForSchedule(schedule).error
+      next_run_preview: nextRunOutsidePause(schedule, getConfig()).next_run_at,
+      schedule_error: nextRunOutsidePause(schedule, getConfig()).error
     })),
     available: PIPELINES
   }));
@@ -323,7 +454,13 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
   });
 
   route("POST", /^\/api\/pipelines\/([\w-]+)\/run$/, (req, res, [pipeline]) => {
-    const runId = scheduler.enqueue(pipeline, "force");
+    let runId;
+    try {
+      runId = scheduler.enqueue(pipeline, "force");
+    } catch (error) {
+      if (error.code === "pause_active") throw new HttpError(409, "Pausa global ativa", "pause_active");
+      throw error;
+    }
     if (!runId) throw new HttpError(409, "este pipeline já está na fila ou em execução");
     return { run_id: runId, scheduler: scheduler.status() };
   });
@@ -332,7 +469,7 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
     const body = await readBody(req);
     const valid = isValidCron(body.cron);
     const preview = valid
-      ? collectNextRuns({ mode: "auto", schedule_kind: "cron", cron: body.cron, weekdays: body.weekdays, window_start: body.window_start, window_end: body.window_end }, 5)
+      ? collectNextRuns({ mode: "auto", schedule_kind: "cron", cron: body.cron, weekdays: body.weekdays, window_start: body.window_start, window_end: body.window_end }, 5, getConfig())
       : [];
     return { valid, preview };
   });
@@ -365,7 +502,13 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
     }
     if (record.kind !== "job") throw new HttpError(400, "envio manual disponível apenas para vagas");
 
-    const runId = scheduler.enqueueCommand("jobs", "jobs:apply-one", [record.record_id], "manual");
+    let runId;
+    try {
+      runId = scheduler.enqueueCommand("jobs", "jobs:apply-one", [record.record_id], "manual");
+    } catch (error) {
+      if (error.code === "pause_active") throw new HttpError(409, "Pausa global ativa", "pause_active");
+      throw error;
+    }
     store.setSendState(record.record_id, { send_state: "in_progress", sent_by: "manual" });
     return { run_id: runId, item: store.getAgentRecord(id) };
   });
@@ -407,8 +550,11 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
     const applied = [];
     const rejected = [];
 
-    // Each field is validated on its own: one bad value never discards the rest.
-    for (const [path, value] of Object.entries(patch)) {
+    const pauseEntries = Object.entries(patch).filter(([path]) => path.startsWith("pause."));
+    const regularEntries = Object.entries(patch).filter(([path]) => !path.startsWith("pause."));
+
+    // Each non-pause field is validated on its own: one bad value never discards the rest.
+    for (const [path, value] of regularEntries) {
       try {
         setPath(overrides, path, coerceEditable(path, value));
         applied.push(path);
@@ -417,8 +563,31 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
       }
     }
 
+    // Pause fields form one invariant and are therefore applied atomically.
+    if (pauseEntries.length) {
+      const candidate = { ...getConfig().pause };
+      const coerced = [];
+      try {
+        for (const [path, value] of pauseEntries) {
+          const next = coerceEditable(path, value);
+          candidate[path.slice("pause.".length)] = next;
+          coerced.push([path, next]);
+        }
+        const validation = validatePauseConfig(candidate);
+        if (!validation.valid) throw new HttpError(400, validation.code, validation.code);
+        for (const [path, value] of coerced) {
+          setPath(overrides, path, value);
+          applied.push(path);
+        }
+      } catch (error) {
+        const code = error.code || "pause_invalid";
+        for (const [path] of pauseEntries) rejected.push({ path, error: error.message, code });
+      }
+    }
+
     store.setConfigOverrides(overrides);
     const config = refreshConfig();
+    scheduler.refreshAllNextRuns();
     return {
       applied,
       rejected,
@@ -643,11 +812,14 @@ function runCliJson(command, args = [], { input = null, timeoutMs = 120_000 } = 
   });
 }
 
-function collectNextRuns(schedule, count = 5) {
+function collectNextRuns(schedule, count = 5, config = null) {
   const runs = [];
   let cursor = new Date();
   for (let index = 0; index < count; index++) {
-    const { next_run_at } = nextRunForSchedule({ ...schedule, last_run_at: cursor.toISOString() }, cursor);
+    const resolver = config ? nextRunOutsidePause : nextRunForSchedule;
+    const { next_run_at } = config
+      ? resolver({ ...schedule, last_run_at: cursor.toISOString() }, config, cursor)
+      : resolver({ ...schedule, last_run_at: cursor.toISOString() }, cursor);
     if (!next_run_at) break;
     runs.push(next_run_at);
     cursor = new Date(next_run_at);
@@ -695,11 +867,21 @@ export function startServer({ port = PORT, host = HOST } = {}) {
     for (const problem of imported.skipped) console.warn(`[web] ignorado -> ${problem}`);
   }
 
+  const pauseMigration = migratePauseConfigV1(store);
+  if (pauseMigration.migrated) console.log(`[web] pausa global inicializada; ${pauseMigration.cleared_windows} janela(s) legada(s) removida(s)`);
+
   let config = readConfig(store);
+
+  // Installs that had keys before roles existed get a primary (and fallback).
+  const roles = migrateProviderRolesV1(store, config);
+  if (roles.migrated) {
+    console.log(`[web] providers migrados: principal=${roles.primary}${roles.fallback ? `, fallback=${roles.fallback}` : ""}`);
+  }
+
   const getConfig = () => config;
   const refreshConfig = () => { config = readConfig(store); return config; };
 
-  const scheduler = new Scheduler(store);
+  const scheduler = new Scheduler(store, { getConfig });
   const { routes } = createApp({ store, scheduler, getConfig, refreshConfig });
 
   const server = http.createServer(async (req, res) => {
@@ -723,7 +905,11 @@ export function startServer({ port = PORT, host = HOST } = {}) {
         } catch (error) {
           const status = error instanceof HttpError ? error.status : 500;
           if (status === 500) console.error("[web]", error);
-          sendJson(res, status, { error: error.message || "erro interno" });
+          sendJson(res, status, {
+            error: error.message || "erro interno",
+            code: error.code || (status === 500 ? "internal_error" : "request_failed"),
+            params: error.params || {}
+          });
         }
         return;
       }

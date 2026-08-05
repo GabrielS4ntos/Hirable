@@ -2,7 +2,8 @@ import * as React from "react";
 import { CalendarClock, CheckCircle2, Loader2, Play, Save, TriangleAlert } from "lucide-react";
 import { api, type PipelineSchedule, type ScheduleKind, type ScheduleMode } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
-import { WEEKDAY_LABELS, formatDateTime, formatFullDateTime } from "@/lib/format";
+import { formatDateTime, formatFullDateTime, weekdayLabel } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -66,6 +67,7 @@ function SkeletonCard() {
 
 function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSaved: () => void }) {
   const toast = useToast();
+  const { t } = useI18n();
   const [draft, setDraft] = React.useState<PipelineSchedule>(schedule);
   const [saving, setSaving] = React.useState(false);
   const [running, setRunning] = React.useState(false);
@@ -328,7 +330,8 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
             <div className="space-y-2">
               <Label>Dias da semana</Label>
               <div className="flex flex-wrap gap-1.5">
-                {WEEKDAY_LABELS.map((label, index) => {
+                {[0, 1, 2, 3, 4, 5, 6].map((index: number) => {
+                  const label = weekdayLabel(index, t);
                   const active = draft.weekdays.includes(index);
                   return (
                     <button

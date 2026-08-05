@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { nextRunForSchedule } from "./cron.js";
+import { canStartDuringPause, nextRunOutsidePause } from "./pause.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), "..");
@@ -15,7 +16,7 @@ const INBOX_PIPELINES = new Set(["network", "dm"]);
  * Resolves network/DM as one complete future pair. An orphan DM whose network
  * slot is already in the past is deliberately skipped after boot or downtime.
  */
-export function nextInboxPair(networkSchedule, dmSchedule, from = new Date(), offsetMinutes = 5) {
+export function nextInboxPair(networkSchedule, dmSchedule, from = new Date(), offsetMinutes = 5, resolveNext = nextRunForSchedule) {
   if (!networkSchedule || !dmSchedule) return { network: null, dm: null, error: "inbox schedules not found" };
   if (networkSchedule.mode !== "auto" || dmSchedule.mode !== "auto") {
     return { network: null, dm: null, error: "network and dm must both be automatic" };
@@ -26,11 +27,11 @@ export function nextInboxPair(networkSchedule, dmSchedule, from = new Date(), of
 
   let cursor = new Date(from);
   for (let attempt = 0; attempt < 500; attempt++) {
-    const networkResult = nextRunForSchedule(networkSchedule, cursor);
+    const networkResult = resolveNext(networkSchedule, cursor);
     if (!networkResult.next_run_at) return { network: null, dm: null, error: networkResult.error || "no future network slot" };
     const networkAt = new Date(networkResult.next_run_at);
     const expectedDmAt = new Date(networkAt.getTime() + offsetMinutes * 60_000);
-    const dmResult = nextRunForSchedule(dmSchedule, networkAt);
+    const dmResult = resolveNext(dmSchedule, networkAt);
     if (!dmResult.next_run_at) return { network: null, dm: null, error: dmResult.error || "no future dm slot" };
     const dmAt = new Date(dmResult.next_run_at);
     if (dmAt.getTime() === expectedDmAt.getTime()) {
@@ -54,11 +55,12 @@ function statusAfterResolve(schedule, error) {
  * executes at most one pipeline at a time and queues everything else.
  */
 export class Scheduler {
-  constructor(store, { tickMs = DEFAULT_TICK_MS, maxRuntimeMs = DEFAULT_MAX_RUNTIME_MS, logger = console } = {}) {
+  constructor(store, { tickMs = DEFAULT_TICK_MS, maxRuntimeMs = DEFAULT_MAX_RUNTIME_MS, logger = console, getConfig = null } = {}) {
     this.store = store;
     this.tickMs = tickMs;
     this.maxRuntimeMs = maxRuntimeMs;
     this.logger = logger;
+    this.getConfig = getConfig || (() => ({ timezone: Intl.DateTimeFormat().resolvedOptions().timeZone, pause: { enabled: false, start: "22:00", end: "08:00", allow_manual_runs: true } }));
     this.timer = null;
     this.queue = [];
     this.current = null;
@@ -113,7 +115,7 @@ export class Scheduler {
   refreshInboxPair(from = new Date()) {
     const network = this.store.getSchedule("network");
     const dm = this.store.getSchedule("dm");
-    const pair = nextInboxPair(network, dm, from);
+    const pair = nextInboxPair(network, dm, from, 5, (schedule, cursor) => this.#nextRun(schedule, cursor));
 
     if (!pair.error) {
       if (network) this.store.setScheduleRuntime("network", { next_run_at: pair.network, last_status: statusAfterResolve(network, null) });
@@ -124,7 +126,7 @@ export class Scheduler {
     const resolved = { network: null, dm: null, error: null, paired: false };
     for (const schedule of [network, dm]) {
       if (!schedule) continue;
-      const { next_run_at, error } = nextRunForSchedule(schedule, from);
+      const { next_run_at, error } = this.#nextRun(schedule, from);
       resolved[schedule.pipeline] = next_run_at;
       this.store.setScheduleRuntime(schedule.pipeline, {
         next_run_at,
@@ -138,7 +140,7 @@ export class Scheduler {
     if (INBOX_PIPELINES.has(pipeline)) return this.refreshInboxPair(from)[pipeline];
     const schedule = this.store.getSchedule(pipeline);
     if (!schedule) return null;
-    const { next_run_at, error } = nextRunForSchedule(schedule, from);
+    const { next_run_at, error } = this.#nextRun(schedule, from);
     this.store.setScheduleRuntime(pipeline, {
       next_run_at,
       last_status: statusAfterResolve(schedule, error)
@@ -158,9 +160,13 @@ export class Scheduler {
         continue;
       }
       if (new Date(schedule.next_run_at) > now) continue;
+      if (!canStartDuringPause(this.getConfig(), "auto", now).allowed) {
+        this.refreshNextRun(schedule.pipeline, now);
+        continue;
+      }
       this.enqueue(schedule.pipeline, "auto");
       // Move the marker forward immediately so a slow run cannot double-fire.
-      const nextAfter = nextRunForSchedule({ ...schedule, last_run_at: now.toISOString() }, now);
+      const nextAfter = this.#nextRun({ ...schedule, last_run_at: now.toISOString() }, now);
       this.store.setScheduleRuntime(schedule.pipeline, { next_run_at: nextAfter.next_run_at });
     }
     this.#drain();
@@ -176,6 +182,14 @@ export class Scheduler {
     if (trigger === "auto" && schedule.mode !== "auto") return null;
     if (schedule.mode === "off" && trigger !== "force") return null;
 
+    const pauseDecision = canStartDuringPause(this.getConfig(), trigger);
+    if (!pauseDecision.allowed) {
+      if (trigger === "auto") return null;
+      const error = new Error("pause_active");
+      error.code = "pause_active";
+      throw error;
+    }
+
     const alreadyQueued = this.queue.some((item) => item.pipeline === pipeline) || this.current?.pipeline === pipeline;
     if (alreadyQueued) return null;
 
@@ -189,6 +203,12 @@ export class Scheduler {
 
   /** Queues an arbitrary CLI command that is not a scheduled pipeline (manual actions). */
   enqueueCommand(pipeline, command, args = [], trigger = "manual") {
+    const pauseDecision = canStartDuringPause(this.getConfig(), trigger);
+    if (!pauseDecision.allowed) {
+      const error = new Error("pause_active");
+      error.code = "pause_active";
+      throw error;
+    }
     const runId = this.store.startRun({ pipeline, trigger });
     this.queue.push({ pipeline, trigger, runId, command, args, readyAt: Date.now() });
     this.#emit({ type: "queued", pipeline, runId, trigger });
@@ -215,6 +235,16 @@ export class Scheduler {
       return;
     }
     const [job] = this.queue.splice(nextIndex, 1);
+    const pauseDecision = canStartDuringPause(this.getConfig(), job.trigger);
+    if (!pauseDecision.allowed) {
+      const summary = { status: "skipped", code: "pause_active_before_start" };
+      this.store.finishRun(job.runId, { status: "skipped", summary });
+      this.store.setScheduleRuntime(job.pipeline, { last_status: "skipped:pause_active_before_start" });
+      if (job.trigger === "auto") this.refreshNextRun(job.pipeline);
+      this.#emit({ type: "finished", pipeline: job.pipeline, runId: job.runId, status: "skipped", summary });
+      this.#drain();
+      return;
+    }
     this.#execute(job);
   }
 
@@ -222,7 +252,7 @@ export class Scheduler {
     const startedAt = new Date().toISOString();
     const child = spawn(process.execPath, [CLI_PATH, job.command, ...job.args], {
       cwd: ROOT,
-      env: { ...process.env, LINKEDIN_HEADLESS: process.env.LINKEDIN_HEADLESS || "true" },
+      env: { ...process.env, LINKEDIN_HEADLESS: process.env.LINKEDIN_HEADLESS || "true", AGENT_TRIGGER: job.trigger },
       stdio: ["ignore", "pipe", "pipe"]
     });
 
@@ -263,6 +293,10 @@ export class Scheduler {
 
     child.on("error", (error) => finish(null, error));
     child.on("close", (code) => finish(code));
+  }
+
+  #nextRun(schedule, from = new Date()) {
+    return nextRunOutsidePause(schedule, this.getConfig(), from);
   }
 }
 

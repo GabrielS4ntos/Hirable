@@ -1,6 +1,7 @@
 import * as React from "react";
 import { KeyRound, Loader2, Plus, Trash2 } from "lucide-react";
-import { api, type ApiKey } from "@/lib/api";
+import { api, type ApiKey, type ModelProvider } from "@/lib/api";
+import { ProviderCards } from "@/components/ProviderCards";
 import type { PageProps } from "@/lib/page";
 import { usePolling } from "@/hooks/usePolling";
 import { formatDateTime } from "@/lib/format";
@@ -17,14 +18,17 @@ import { useToast } from "@/components/ui/toast";
 export function KeysPage({ refreshStatus }: PageProps) {
   const toast = useToast();
   const keys = usePolling(api.listKeys, 0);
-  const [provider, setProvider] = React.useState<"gemini" | "openrouter">("gemini");
+  const [provider, setProvider] = React.useState<string>("gemini");
   const [label, setLabel] = React.useState("");
   const [secret, setSecret] = React.useState("");
   const [saving, setSaving] = React.useState(false);
+  const [providers, setProviders] = React.useState<ModelProvider[]>([]);
+
+  React.useEffect(() => {
+    api.listProviders().then((result) => setProviders(result.items)).catch(() => {});
+  }, []);
 
   const items = keys.data?.items ?? [];
-  const gemini = items.filter((item) => item.provider === "gemini");
-  const openrouter = items.filter((item) => item.provider === "openrouter");
 
   async function addKey(event: React.FormEvent) {
     event.preventDefault();
@@ -57,6 +61,19 @@ export function KeysPage({ refreshStatus }: PageProps) {
     <div className="space-y-6">
       <Card>
         <CardHeader>
+          <CardTitle>Providers de modelo</CardTitle>
+          <CardDescription>
+            O principal recebe todas as chamadas; o fallback assume quando ele falha por cota. Com dois providers
+            configurados, escolher o principal define o outro como fallback automaticamente.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ProviderCards providers={providers} onChange={setProviders} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Plus className="size-4" />
             Nova chave
@@ -71,13 +88,16 @@ export function KeysPage({ refreshStatus }: PageProps) {
           <form onSubmit={addKey} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-[10rem_1fr_2fr_auto]">
             <div className="space-y-1.5">
               <Label>Provedor</Label>
-              <Select value={provider} onValueChange={(value) => setProvider(value as "gemini" | "openrouter")}>
+              <Select value={provider} onValueChange={(value) => setProvider(value)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="gemini">Gemini</SelectItem>
-                  <SelectItem value="openrouter">OpenRouter</SelectItem>
+                  {providers.map((item) => (
+                    <SelectItem key={item.id} value={item.id}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
@@ -117,21 +137,18 @@ export function KeysPage({ refreshStatus }: PageProps) {
         </CardContent>
       </Card>
 
-      <KeyTable
-        title="Gemini"
-        description={`${gemini.filter((item) => item.enabled).length} ativa(s) em rodízio`}
-        items={gemini}
-        onToggle={(item) => mutate(api.updateKey(item.id, { enabled: !item.enabled }), item.enabled ? "Chave desativada" : "Chave ativada")}
-        onDelete={(item) => mutate(api.deleteKey(item.id), "Chave removida")}
-      />
-
-      <KeyTable
-        title="OpenRouter"
-        description="Fallback usado quando o Gemini esgota a cota"
-        items={openrouter}
-        onToggle={(item) => mutate(api.updateKey(item.id, { enabled: !item.enabled }), item.enabled ? "Chave desativada" : "Chave ativada")}
-        onDelete={(item) => mutate(api.deleteKey(item.id), "Chave removida")}
-      />
+      {providers.map((provider) => (
+        <KeyTable
+          key={provider.id}
+          title={provider.label}
+          description={`${items.filter((item) => item.provider === provider.id && item.enabled).length} ativa(s)${
+            provider.role === "primary" ? " · principal" : provider.role === "fallback" ? " · fallback" : ""
+          }`}
+          items={items.filter((item) => item.provider === provider.id)}
+          onToggle={(item) => mutate(api.updateKey(item.id, { enabled: !item.enabled }), item.enabled ? "Chave desativada" : "Chave ativada")}
+          onDelete={(item) => mutate(api.deleteKey(item.id), "Chave removida")}
+        />
+      ))}
     </div>
   );
 }

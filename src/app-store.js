@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { PROVIDERS, PROVIDER_IDS, ROLES, applyRoleChange, getProvider, rolesAfterConfiguring } from "./providers.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -193,6 +194,35 @@ export class AppStore {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS model_providers (
+        provider TEXT PRIMARY KEY,
+        model TEXT NOT NULL DEFAULT '',
+        -- Exactly one primary, at most one fallback; everything else is idle.
+        role TEXT NOT NULL DEFAULT 'none' CHECK (role IN ('primary', 'fallback', 'none')),
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS resume_documents (
+        id TEXT PRIMARY KEY,
+        label TEXT NOT NULL,
+        original_name TEXT NOT NULL,
+        stored_name TEXT NOT NULL,
+        mime_type TEXT NOT NULL DEFAULT '',
+        size_bytes INTEGER NOT NULL DEFAULT 0,
+        -- Compact index built once on upload; job matching reads this, never the file.
+        summary TEXT NOT NULL DEFAULT '',
+        headline TEXT NOT NULL DEFAULT '',
+        roles_json TEXT NOT NULL DEFAULT '[]',
+        technologies_json TEXT NOT NULL DEFAULT '[]',
+        seniority TEXT NOT NULL DEFAULT '',
+        indexed_at TEXT,
+        index_error TEXT,
+        is_default INTEGER NOT NULL DEFAULT 0,
+        use_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS user_profile (
         id INTEGER PRIMARY KEY CHECK (id = 1),
         resume_text TEXT NOT NULL DEFAULT '',
@@ -202,12 +232,132 @@ export class AppStore {
         updated_at TEXT NOT NULL
       );
     `);
+    this.#migrateApiKeyProviders();
     try { fs.chmodSync(databasePath, 0o600); } catch {}
     this.ensureDefaultSchedules();
   }
 
+  /**
+   * Widens the api_keys provider CHECK to include OpenAI.
+   *
+   * SQLite cannot alter a CHECK constraint, so the table is rebuilt in a
+   * transaction when the old constraint is still in place.
+   */
+  #migrateApiKeyProviders() {
+    const sql = this.db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'api_keys'").get()?.sql || "";
+    if (sql.includes("'openai'")) return;
+
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      this.db.exec(`
+        CREATE TABLE api_keys_new (
+          id TEXT PRIMARY KEY,
+          provider TEXT NOT NULL CHECK (provider IN ('gemini', 'openrouter', 'openai')),
+          label TEXT NOT NULL,
+          secret TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          priority INTEGER NOT NULL DEFAULT 0,
+          use_count INTEGER NOT NULL DEFAULT 0,
+          last_used_at TEXT,
+          last_error TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+        INSERT INTO api_keys_new SELECT id, provider, label, secret, enabled, priority, use_count, last_used_at, last_error, created_at, updated_at FROM api_keys;
+        DROP TABLE api_keys;
+        ALTER TABLE api_keys_new RENAME TO api_keys;
+        CREATE INDEX IF NOT EXISTS idx_api_keys_provider ON api_keys(provider, enabled, priority);
+      `);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   close() {
     this.db.close();
+  }
+
+  /* ------------------------------------------------------------- providers */
+
+  /** Catalog merged with what the user configured: keys, model and role. */
+  listProviders() {
+    const rows = this.db.prepare("SELECT * FROM model_providers").all();
+    const byId = new Map(rows.map((row) => [row.provider, row]));
+    const counts = new Map(
+      this.db.prepare("SELECT provider, COUNT(*) AS total, SUM(enabled) AS active FROM api_keys GROUP BY provider")
+        .all()
+        .map((row) => [row.provider, row])
+    );
+
+    return PROVIDERS.map((provider) => {
+      const row = byId.get(provider.id);
+      const count = counts.get(provider.id);
+      const activeKeys = Number(count?.active || 0);
+      return {
+        ...provider,
+        model: row?.model || provider.default_model,
+        role: activeKeys ? (row?.role || "none") : "none",
+        key_count: Number(count?.total || 0),
+        active_key_count: activeKeys,
+        configured: activeKeys > 0,
+        updated_at: row?.updated_at || null
+      };
+    });
+  }
+
+  primaryProvider() {
+    return this.listProviders().find((provider) => provider.role === "primary") || null;
+  }
+
+  fallbackProvider() {
+    return this.listProviders().find((provider) => provider.role === "fallback") || null;
+  }
+
+  #writeRoles(roles) {
+    const timestamp = nowIso();
+    const statement = this.db.prepare(`
+      INSERT INTO model_providers (provider, model, role, updated_at) VALUES (?, '', ?, ?)
+      ON CONFLICT(provider) DO UPDATE SET role = excluded.role, updated_at = excluded.updated_at
+    `);
+    for (const [provider, role] of Object.entries(roles)) statement.run(provider, role, timestamp);
+  }
+
+  /** Changes one provider's role and settles the others by the pairing rule. */
+  setProviderRole(provider, role) {
+    if (!getProvider(provider)) throw new Error(`provider desconhecido: ${provider}`);
+    if (!ROLES.includes(role)) throw new Error(`papel deve ser um de: ${ROLES.join(", ")}`);
+    const current = this.listProviders();
+    const target = current.find((item) => item.provider === provider || item.id === provider);
+    if (role !== "none" && !target?.configured) throw new Error("cadastre uma chave para este provider antes de dar um papel a ele");
+
+    this.#writeRoles(applyRoleChange(current.map((item) => ({ provider: item.id, role: item.role, configured: item.configured })), provider, role));
+    return this.listProviders();
+  }
+
+  setProviderModel(provider, model) {
+    const known = getProvider(provider);
+    if (!known) throw new Error(`provider desconhecido: ${provider}`);
+    const clean = String(model || "").trim().slice(0, 120);
+    if (!clean) throw new Error("informe o modelo");
+    const timestamp = nowIso();
+    this.db.prepare(`
+      INSERT INTO model_providers (provider, model, role, updated_at) VALUES (?, ?, 'none', ?)
+      ON CONFLICT(provider) DO UPDATE SET model = excluded.model, updated_at = excluded.updated_at
+    `).run(provider, clean, timestamp);
+    return this.listProviders();
+  }
+
+  /**
+   * Settles roles after a provider gained its first key. Called by the API right
+   * after a key is created, so the very first provider becomes primary on its own.
+   */
+  settleProviderRoles(provider, { makePrimary = false } = {}) {
+    const current = this.listProviders()
+      .map((item) => ({ provider: item.id, role: item.role, configured: item.configured }));
+    this.#writeRoles(rolesAfterConfiguring(current, provider, { makePrimary }));
+    return this.listProviders();
   }
 
   /* ---------------------------------------------------------------- api keys */
@@ -243,7 +393,7 @@ export class AppStore {
 
   createApiKey({ provider, label, secret, enabled = true, priority = 0 }) {
     const cleanProvider = String(provider || "").trim();
-    if (!["gemini", "openrouter"].includes(cleanProvider)) throw new Error("provider must be gemini or openrouter");
+    if (!PROVIDER_IDS.includes(cleanProvider)) throw new Error(`provider deve ser um de: ${PROVIDER_IDS.join(", ")}`);
     const cleanSecret = String(secret || "").trim();
     if (cleanSecret.length < 8) throw new Error("secret is too short");
     const cleanLabel = String(label || "").trim().slice(0, 80) || `${cleanProvider} key`;
@@ -853,6 +1003,91 @@ export class AppStore {
     };
   }
 
+  /* -------------------------------------------------------------- resumes */
+
+  listResumes() {
+    return this.db.prepare("SELECT * FROM resume_documents ORDER BY is_default DESC, created_at ASC")
+      .all()
+      .map(mapResumeRow);
+  }
+
+  getResume(id) {
+    const row = this.db.prepare("SELECT * FROM resume_documents WHERE id = ?").get(String(id));
+    return row ? mapResumeRow(row) : null;
+  }
+
+  createResume({ label, original_name, stored_name, mime_type = "", size_bytes = 0 }) {
+    const id = randomId();
+    const timestamp = nowIso();
+    const isFirst = this.db.prepare("SELECT COUNT(*) AS total FROM resume_documents").get().total === 0;
+    this.db.prepare(`
+      INSERT INTO resume_documents (id, label, original_name, stored_name, mime_type, size_bytes, is_default, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      id,
+      String(label || original_name).trim().slice(0, 120),
+      String(original_name).slice(0, 300),
+      String(stored_name).slice(0, 300),
+      String(mime_type).slice(0, 120),
+      Number(size_bytes) || 0,
+      isFirst ? 1 : 0,
+      timestamp,
+      timestamp
+    );
+    return id;
+  }
+
+  /** Stores the compact index a single summarization call produced. */
+  setResumeIndex(id, { summary = "", headline = "", roles = [], technologies = [], seniority = "", error = null } = {}) {
+    this.db.prepare(`
+      UPDATE resume_documents SET
+        summary = ?, headline = ?, roles_json = ?, technologies_json = ?, seniority = ?,
+        indexed_at = ?, index_error = ?, updated_at = ?
+      WHERE id = ?
+    `).run(
+      String(summary).slice(0, 2000),
+      String(headline).slice(0, 200),
+      JSON.stringify((roles || []).map((item) => String(item).slice(0, 80)).slice(0, 20)),
+      JSON.stringify((technologies || []).map((item) => String(item).slice(0, 60)).slice(0, 60)),
+      String(seniority).slice(0, 40),
+      error ? null : nowIso(),
+      error ? String(error).slice(0, 500) : null,
+      nowIso(),
+      String(id)
+    );
+    return this.getResume(id);
+  }
+
+  updateResume(id, { label, is_default } = {}) {
+    const current = this.getResume(id);
+    if (!current) throw new Error("currículo não encontrado");
+    if (is_default) this.db.prepare("UPDATE resume_documents SET is_default = 0").run();
+    this.db.prepare("UPDATE resume_documents SET label = ?, is_default = ?, updated_at = ? WHERE id = ?").run(
+      label === undefined ? current.label : String(label).trim().slice(0, 120),
+      is_default === undefined ? (current.is_default ? 1 : 0) : (is_default ? 1 : 0),
+      nowIso(),
+      String(id)
+    );
+    return this.getResume(id);
+  }
+
+  deleteResume(id) {
+    const resume = this.getResume(id);
+    if (!resume) return null;
+    this.db.prepare("DELETE FROM resume_documents WHERE id = ?").run(String(id));
+    // Never leave the set without a default.
+    if (resume.is_default) {
+      const next = this.db.prepare("SELECT id FROM resume_documents ORDER BY created_at ASC LIMIT 1").get();
+      if (next) this.db.prepare("UPDATE resume_documents SET is_default = 1 WHERE id = ?").run(next.id);
+    }
+    return resume;
+  }
+
+  markResumeUsed(id) {
+    this.db.prepare("UPDATE resume_documents SET use_count = use_count + 1, updated_at = ? WHERE id = ?")
+      .run(nowIso(), String(id));
+  }
+
   /* ---------------------------------------------------------- user profile */
 
   /**
@@ -939,6 +1174,29 @@ export class AppStore {
     for (const row of rows) settings[row.key] = safeParse(row.value_json);
     return settings;
   }
+}
+
+function mapResumeRow(row) {
+  return {
+    id: row.id,
+    label: row.label,
+    original_name: row.original_name,
+    stored_name: row.stored_name,
+    mime_type: row.mime_type,
+    size_bytes: Number(row.size_bytes || 0),
+    summary: row.summary,
+    headline: row.headline,
+    roles: safeParse(row.roles_json) || [],
+    technologies: safeParse(row.technologies_json) || [],
+    seniority: row.seniority,
+    indexed: Boolean(row.indexed_at),
+    indexed_at: row.indexed_at,
+    index_error: row.index_error,
+    is_default: Boolean(row.is_default),
+    use_count: Number(row.use_count || 0),
+    created_at: row.created_at,
+    updated_at: row.updated_at
+  };
 }
 
 function mapAgentRecordRow(row) {

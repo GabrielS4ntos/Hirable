@@ -154,7 +154,17 @@ export type StatusPayload = {
   schedules: PipelineSchedule[];
   counts: Record<RecordKind, Record<string, number>>;
   keys: { gemini: number; openrouter: number };
+  providers: { id: string; label: string; role: string; model: string; configured: boolean }[];
   model_gate: Record<string, string | null>;
+  pause: {
+    enabled: boolean;
+    start: string;
+    end: string;
+    allow_manual_runs: boolean;
+    active: boolean;
+    manual_run_allowed: boolean;
+    next_boundary_at: string | null;
+  };
 };
 
 export type GoogleIntegrationStatus = {
@@ -193,7 +203,7 @@ export type IntegrationsPayload = {
 export type ConfigField = {
   path: string;
   label: string;
-  type: "string" | "int" | "boolean" | "searches" | "known_answers" | "string_map";
+  type: "string" | "clock" | "int" | "boolean" | "searches" | "known_answers" | "string_map";
   min?: number;
   max?: number;
   value: any;
@@ -205,15 +215,58 @@ export type ConfigPayload = {
   imported_at: string | null;
 };
 
+export type ResumeDocument = {
+  id: string;
+  label: string;
+  original_name: string;
+  mime_type: string;
+  size_bytes: number;
+  summary: string;
+  headline: string;
+  roles: string[];
+  technologies: string[];
+  seniority: string;
+  indexed: boolean;
+  indexed_at: string | null;
+  index_error: string | null;
+  is_default: boolean;
+  use_count: number;
+};
+
+export type ModelProvider = {
+  id: string;
+  label: string;
+  docs_url: string;
+  key_hint: string;
+  supports_multiple_keys: boolean;
+  models: string[];
+  default_model: string;
+  model: string;
+  role: "primary" | "fallback" | "none";
+  key_count: number;
+  active_key_count: number;
+  configured: boolean;
+};
+
 export class ApiError extends Error {
   status: number;
+  code: string;
+  params: Record<string, string | number>;
   /** Seconds to wait, parsed from a 429 response. */
   retryAfter: number | null;
 
-  constructor(message: string, status: number, retryAfter: number | null = null) {
+  constructor(
+    message: string,
+    status: number,
+    retryAfter: number | null = null,
+    code = "request_failed",
+    params: Record<string, string | number> = {}
+  ) {
     super(message);
     this.status = status;
     this.retryAfter = retryAfter;
+    this.code = code;
+    this.params = params;
   }
 }
 
@@ -226,7 +279,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const body = text ? JSON.parse(text) : {};
   if (!response.ok) {
     const seconds = Number(/(\d+)s/.exec(body.error || "")?.[1]);
-    throw new ApiError(body.error || `Erro ${response.status}`, response.status, Number.isFinite(seconds) ? seconds : null);
+    throw new ApiError(
+      body.error || `Erro ${response.status}`,
+      response.status,
+      Number.isFinite(seconds) ? seconds : null,
+      body.code || (response.status === 429 ? "rate_limited" : "request_failed"),
+      body.params || {}
+    );
   }
   return body as T;
 }
@@ -249,9 +308,34 @@ export const api = {
     }>("/api/profile/extract", { method: "POST", body: JSON.stringify({ resume_text: resumeText }) }),
   resetOnboarding: () => request<{ onboarding_complete: boolean }>("/api/profile/reset-onboarding", { method: "POST" }),
 
+  listResumes: () => request<{ items: ResumeDocument[] }>("/api/resumes"),
+  uploadResume: (input: { filename: string; label?: string; mime_type?: string; content_base64: string }) =>
+    request<{ id: string; items: ResumeDocument[]; extraction: { kind: string; extracted: boolean; reason: string } }>(
+      "/api/resumes",
+      { method: "POST", body: JSON.stringify(input) }
+    ),
+  updateResume: (id: string, patch: { label?: string; is_default?: boolean }) =>
+    request<{ items: ResumeDocument[] }>(`/api/resumes/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+  deleteResume: (id: string) => request<{ items: ResumeDocument[] }>(`/api/resumes/${id}`, { method: "DELETE" }),
+  reindexResume: (id: string) =>
+    request<{ items: ResumeDocument[] }>(`/api/resumes/${id}/reindex`, { method: "POST" }),
+
+  listProviders: () => request<{ items: ModelProvider[] }>("/api/providers"),
+  updateProvider: (provider: string, patch: { role?: string; model?: string }) =>
+    request<{ items: ModelProvider[] }>(`/api/providers/${provider}`, { method: "PUT", body: JSON.stringify(patch) }),
+
   listKeys: () => request<{ items: ApiKey[] }>("/api/keys"),
-  createKey: (input: { provider: string; label: string; secret: string; enabled?: boolean }) =>
-    request<{ items: ApiKey[] }>("/api/keys", { method: "POST", body: JSON.stringify(input) }),
+  createKey: (input: {
+    provider: string;
+    label: string;
+    secret: string;
+    enabled?: boolean;
+    model?: string;
+    make_primary?: boolean;
+  }) => request<{ id: string; items: ApiKey[]; providers: ModelProvider[] }>("/api/keys", {
+    method: "POST",
+    body: JSON.stringify(input)
+  }),
   updateKey: (id: string, patch: Partial<{ label: string; secret: string; enabled: boolean; priority: number }>) =>
     request<{ items: ApiKey[] }>(`/api/keys/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
   deleteKey: (id: string) => request<{ items: ApiKey[] }>(`/api/keys/${id}`, { method: "DELETE" }),

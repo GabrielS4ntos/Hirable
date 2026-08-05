@@ -91,7 +91,7 @@ export function nextPauseBoundary(date, pause, timeZone) {
   return null;
 }
 
-export function pauseStatus(config, date = new Date()) {
+function currentPauseState(config, date = new Date()) {
   const pause = validatePauseConfig(config?.pause || {}).value || {
     enabled: false,
     start: "22:00",
@@ -104,9 +104,13 @@ export function pauseStatus(config, date = new Date()) {
     ...pause,
     timezone: timeZone,
     active,
-    manual_run_allowed_now: !active || pause.allow_manual_runs,
-    next_boundary_at: nextPauseBoundary(date, pause, timeZone)
+    manual_run_allowed_now: !active || pause.allow_manual_runs
   };
+}
+
+export function pauseStatus(config, date = new Date()) {
+  const state = currentPauseState(config, date);
+  return { ...state, next_boundary_at: nextPauseBoundary(date, state, state.timezone) };
 }
 
 export function nextRunOutsidePause(schedule, config, from = new Date()) {
@@ -115,14 +119,14 @@ export function nextRunOutsidePause(schedule, config, from = new Date()) {
     const result = nextRunForSchedule(schedule, cursor);
     if (!result.next_run_at) return result;
     const candidate = new Date(result.next_run_at);
-    if (!pauseStatus(config, candidate).active) return result;
+    if (!currentPauseState(config, candidate).active) return result;
     cursor = candidate;
   }
   return { next_run_at: null, error: "pause_excludes_all_schedule_candidates" };
 }
 
 export function canStartDuringPause(config, trigger, date = new Date()) {
-  const status = pauseStatus(config, date);
+  const status = currentPauseState(config, date);
   if (!status.active) return { allowed: true, status };
   const manual = trigger !== "auto";
   return { allowed: manual && status.allow_manual_runs, status, code: "pause_active" };

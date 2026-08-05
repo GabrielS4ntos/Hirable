@@ -4,14 +4,15 @@ import { api, type AgentRecord, type RecordKind, type SendState } from "@/lib/ap
 import type { PageProps } from "@/lib/page";
 import { usePolling } from "@/hooks/usePolling";
 import {
-  DECISION_LABELS,
-  SEND_STATE_LABELS,
   SEND_STATE_VARIANTS,
+  decisionLabel,
+  sendStateLabel,
   formatDateTime,
   isSendable,
   scoreTone,
   sendDisabledReason
 } from "@/lib/format";
+import { localizedError, useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -23,26 +24,18 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useToast } from "@/components/ui/toast";
 import { RecordDetailDialog } from "@/components/RecordDetailDialog";
 
-const KIND_OPTIONS: { value: RecordKind | "all"; label: string }[] = [
-  { value: "job", label: "Vagas" },
-  { value: "dm", label: "Mensagens" },
-  { value: "invite", label: "Convites" },
-  { value: "all", label: "Tudo" }
-];
-
-const STATE_OPTIONS: { value: SendState | "all"; label: string }[] = [
-  { value: "all", label: "Todos os estados" },
-  { value: "available", label: "Pronta para envio" },
-  { value: "sent_auto", label: "Enviada (automático)" },
-  { value: "sent_manual", label: "Enviada (manual)" },
-  { value: "blocked", label: "Bloqueada" },
-  { value: "unsupported", label: "Sem envio automático" },
-  { value: "failed", label: "Falhou" },
-  { value: "in_progress", label: "Enviando" }
-];
-
 export function JobsPage({ status }: PageProps) {
   const toast = useToast();
+  const { t, locale } = useI18n();
+  const kindOptions: { value: RecordKind | "all"; label: string }[] = [
+    { value: "job", label: t("jobs.jobs") }, { value: "dm", label: t("jobs.messages") },
+    { value: "invite", label: t("jobs.invites") }, { value: "all", label: t("common.all") }
+  ];
+  const stateOptions: { value: SendState | "all"; label: string }[] = [
+    { value: "all", label: t("jobs.allStates") },
+    ...(["available", "sent_auto", "sent_manual", "blocked", "unsupported", "failed", "in_progress"] as SendState[])
+      .map((value) => ({ value, label: sendStateLabel(value, t) }))
+  ];
   const [kind, setKind] = React.useState<RecordKind | "all">("job");
   const [sendState, setSendState] = React.useState<SendState | "all">("all");
   const [query, setQuery] = React.useState("");
@@ -69,13 +62,13 @@ export function JobsPage({ status }: PageProps) {
     try {
       await api.sendRecord(record.record_id);
       toast({
-        title: "Candidatura enfileirada",
-        description: `${record.title} entrou na fila de envio. O navegador abre em segundo plano.`,
+        title: t("jobs.queuedToast"),
+        description: t("jobs.queuedDescription", { title: record.title }),
         variant: "success"
       });
       await records.refresh();
     } catch (error) {
-      toast({ title: "Não foi possível enviar", description: (error as Error).message, variant: "error" });
+      toast({ title: t("jobs.sendError"), description: localizedError(error, t, locale), variant: "error" });
     } finally {
       setSending((current) => {
         const next = new Set(current);
@@ -88,10 +81,10 @@ export function JobsPage({ status }: PageProps) {
   return (
     <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryTile label="Prontas para envio" value={counts.available ?? 0} tone="primary" />
-        <SummaryTile label="Enviadas" value={(counts.sent_auto ?? 0) + (counts.sent_manual ?? 0)} tone="success" />
-        <SummaryTile label="Bloqueadas pelo agente" value={counts.blocked ?? 0} tone="muted" />
-        <SummaryTile label="Sem envio automático" value={counts.unsupported ?? 0} tone="muted" />
+        <SummaryTile label={t("dashboard.ready")} value={counts.available ?? 0} tone="primary" />
+        <SummaryTile label={t("jobs.sent")} value={(counts.sent_auto ?? 0) + (counts.sent_manual ?? 0)} tone="success" />
+        <SummaryTile label={t("jobs.blockedAgent")} value={counts.blocked ?? 0} tone="muted" />
+        <SummaryTile label={t("jobs.noAutomatic")} value={counts.unsupported ?? 0} tone="muted" />
       </div>
 
       <Card>
@@ -102,7 +95,7 @@ export function JobsPage({ status }: PageProps) {
               <Input
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Buscar por título, empresa ou local…"
+                placeholder={t("jobs.searchPlaceholder")}
                 className="pl-9"
               />
             </div>
@@ -112,7 +105,7 @@ export function JobsPage({ status }: PageProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {KIND_OPTIONS.map((option) => (
+                {kindOptions.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
@@ -125,7 +118,7 @@ export function JobsPage({ status }: PageProps) {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {STATE_OPTIONS.map((option) => (
+                {stateOptions.map((option) => (
                   <SelectItem key={option.value} value={option.value}>
                     {option.label}
                   </SelectItem>
@@ -134,7 +127,7 @@ export function JobsPage({ status }: PageProps) {
             </Select>
 
             <span className="ml-auto text-xs text-muted-foreground">
-              {records.data ? `${items.length} de ${records.data.total}` : "carregando…"}
+              {records.data ? t("jobs.count", { shown: items.length, total: records.data.total }) : t("app.loading")}
             </span>
           </div>
 
@@ -147,25 +140,25 @@ export function JobsPage({ status }: PageProps) {
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead className="min-w-64">Item</TableHead>
-                <TableHead className="w-20">Score</TableHead>
-                <TableHead className="w-28">Decisão</TableHead>
-                <TableHead className="min-w-44">Estado</TableHead>
-                <TableHead className="w-32">Analisada</TableHead>
-                <TableHead className="w-36 text-right">Ação</TableHead>
+                <TableHead className="min-w-64">{t("jobs.item")}</TableHead>
+                <TableHead className="w-20">{t("jobs.score")}</TableHead>
+                <TableHead className="w-28">{t("jobs.decision")}</TableHead>
+                <TableHead className="min-w-44">{t("jobs.state")}</TableHead>
+                <TableHead className="w-32">{t("jobs.analyzed")}</TableHead>
+                <TableHead className="w-36 text-right">{t("jobs.action")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {items.length === 0 && !records.loading ? (
                 <TableRow className="hover:bg-transparent">
                   <TableCell colSpan={6} className="py-14 text-center text-sm text-muted-foreground">
-                    Nenhum registro ainda. Rode o pipeline de vagas no Painel para popular esta tabela.
+                    {t("jobs.empty")}
                   </TableCell>
                 </TableRow>
               ) : null}
 
               {items.map((record) => {
-                const disabledReason = sendDisabledReason(record);
+                const disabledReason = sendDisabledReason(record, t, locale);
                 const busy = sending.has(record.record_id) || record.send_state === "in_progress";
                 return (
                   <TableRow key={record.record_id} className="group">
@@ -199,7 +192,7 @@ export function JobsPage({ status }: PageProps) {
                     </TableCell>
 
                     <TableCell>
-                      <span className="text-sm">{DECISION_LABELS[record.decision] ?? record.decision}</span>
+                      <span className="text-sm">{decisionLabel(record.decision, t)}</span>
                     </TableCell>
 
                     <TableCell>
@@ -207,22 +200,22 @@ export function JobsPage({ status }: PageProps) {
                         <TooltipTrigger asChild>
                           <span className="inline-block">
                             <Badge variant={SEND_STATE_VARIANTS[record.send_state]}>
-                              {SEND_STATE_LABELS[record.send_state]}
+                              {sendStateLabel(record.send_state, t)}
                             </Badge>
                           </span>
                         </TooltipTrigger>
-                        <TooltipContent>{disabledReason ?? "Você pode enviar esta candidatura agora."}</TooltipContent>
+                        <TooltipContent>{disabledReason ?? t("jobs.sendPossible")}</TooltipContent>
                       </Tooltip>
                     </TableCell>
 
                     <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
-                      {formatDateTime(record.analyzed_at)}
+                      {formatDateTime(record.analyzed_at, locale, status?.timezone)}
                     </TableCell>
 
                     <TableCell>
                       <div className="flex items-center justify-end gap-1">
                         {record.url ? (
-                          <Button asChild variant="ghost" size="icon" title="Abrir no LinkedIn">
+                          <Button asChild variant="ghost" size="icon" title={t("jobs.openLinkedIn")}>
                             <a href={record.url} target="_blank" rel="noreferrer noopener">
                               <ExternalLink />
                             </a>
@@ -239,12 +232,12 @@ export function JobsPage({ status }: PageProps) {
                                   onClick={() => handleSend(record)}
                                 >
                                   {busy ? <Loader2 className="animate-spin" /> : <Send />}
-                                  Enviar
+                                  {t("jobs.send")}
                                 </Button>
                               </span>
                             </TooltipTrigger>
                             <TooltipContent>
-                              {busy ? "Envio em andamento…" : (disabledReason ?? "Enviar candidatura via Easy Apply")}
+                              {busy ? t("jobs.sendInProgress") : (disabledReason ?? t("jobs.sendEasyApply"))}
                             </TooltipContent>
                           </Tooltip>
                         ) : (
@@ -261,10 +254,8 @@ export function JobsPage({ status }: PageProps) {
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        O botão fica desabilitado quando a vaga já foi enviada (automática ou manualmente), quando não existe
-        método de envio automático (sem Easy Apply) ou quando o agente bloqueou o envio. Passe o mouse sobre o
-        estado para ver o motivo exato.
-        {status?.scheduler.running ? " Um pipeline está em execução: o envio manual entra na fila." : ""}
+        {t("jobs.footer")}
+        {status?.scheduler.running ? t("jobs.pipelineQueueNote") : ""}
       </p>
 
       <RecordDetailDialog record={detail} onOpenChange={(open) => !open && setDetail(null)} />

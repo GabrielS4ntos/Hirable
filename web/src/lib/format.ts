@@ -1,59 +1,50 @@
 import type { AgentRecord, SendState } from "./api";
+import type { AppLocale, Translate } from "./i18n";
 
-const dateTime = new Intl.DateTimeFormat("pt-BR", {
-  day: "2-digit",
-  month: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit"
-});
-
-const fullDateTime = new Intl.DateTimeFormat("pt-BR", {
-  dateStyle: "short",
-  timeStyle: "medium"
-});
-
-export function formatDateTime(value?: string | null) {
+export function formatDateTime(value?: string | null, locale: AppLocale = "pt-BR", timeZone?: string) {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : dateTime.format(date);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(locale, {
+    day: "2-digit",
+    month: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    ...(timeZone ? { timeZone } : {})
+  }).format(date);
 }
 
-export function formatFullDateTime(value?: string | null) {
+export function formatFullDateTime(value?: string | null, locale: AppLocale = "pt-BR", timeZone?: string) {
   if (!value) return "—";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "—" : fullDateTime.format(date);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(locale, {
+    dateStyle: "short",
+    timeStyle: "medium",
+    ...(timeZone ? { timeZone } : {})
+  }).format(date);
 }
 
-export function formatRelative(value?: string | null) {
+export function formatRelative(value?: string | null, locale: AppLocale = "pt-BR") {
   if (!value) return "—";
   const target = new Date(value).getTime();
   if (Number.isNaN(target)) return "—";
   const diffSeconds = Math.round((target - Date.now()) / 1000);
   const absolute = Math.abs(diffSeconds);
-  const formatter = new Intl.RelativeTimeFormat("pt-BR", { numeric: "auto" });
+  const formatter = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   if (absolute < 60) return formatter.format(diffSeconds, "second");
   if (absolute < 3600) return formatter.format(Math.round(diffSeconds / 60), "minute");
   if (absolute < 86400) return formatter.format(Math.round(diffSeconds / 3600), "hour");
   return formatter.format(Math.round(diffSeconds / 86400), "day");
 }
 
-export function formatDuration(ms?: number | null) {
+export function formatDuration(ms?: number | null, locale: AppLocale = "pt-BR") {
   if (!ms && ms !== 0) return "—";
-  if (ms < 1000) return `${ms} ms`;
+  if (ms < 1000) return `${new Intl.NumberFormat(locale).format(ms)} ms`;
   const seconds = Math.round(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
+  if (seconds < 60) return `${new Intl.NumberFormat(locale).format(seconds)}s`;
   return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
-
-export const SEND_STATE_LABELS: Record<SendState, string> = {
-  available: "Pronta para envio",
-  failed: "Falhou",
-  in_progress: "Enviando…",
-  sent_auto: "Enviada (automático)",
-  sent_manual: "Enviada (manual)",
-  unsupported: "Sem envio automático",
-  blocked: "Bloqueada"
-};
 
 export const SEND_STATE_VARIANTS: Record<SendState, "default" | "secondary" | "success" | "warning" | "destructive" | "outline"> = {
   available: "default",
@@ -65,28 +56,40 @@ export const SEND_STATE_VARIANTS: Record<SendState, "default" | "secondary" | "s
   blocked: "secondary"
 };
 
+export function sendStateLabel(state: SendState, t: Translate) {
+  const keys = {
+    available: "send.available",
+    failed: "send.failed",
+    in_progress: "send.inProgress",
+    sent_auto: "send.sentAuto",
+    sent_manual: "send.sentManual",
+    unsupported: "send.unsupported",
+    blocked: "send.blocked"
+  } as const;
+  return t(keys[state]);
+}
+
 export function isSendable(record: AgentRecord) {
   return record.send_state === "available" || record.send_state === "failed";
 }
 
-/** Explains, in one sentence, why the Enviar button is disabled. */
-export function sendDisabledReason(record: AgentRecord): string | null {
+export function sendDisabledReason(record: AgentRecord, t: Translate, locale: AppLocale): string | null {
   switch (record.send_state) {
     case "available":
     case "failed":
       return null;
     case "in_progress":
-      return "Um envio para esta vaga já está em andamento.";
+      return t("send.reasonInProgress");
     case "sent_auto":
-      return `Candidatura já enviada pelo processo automático${record.sent_at ? ` em ${formatFullDateTime(record.sent_at)}` : ""}.`;
+      return t("send.reasonSentAuto", { date: record.sent_at ? ` ${formatFullDateTime(record.sent_at, locale)}` : "" });
     case "sent_manual":
-      return `Candidatura já enviada manualmente${record.sent_at ? ` em ${formatFullDateTime(record.sent_at)}` : ""}.`;
+      return t("send.reasonSentManual", { date: record.sent_at ? ` ${formatFullDateTime(record.sent_at, locale)}` : "" });
     case "unsupported":
-      return record.send_blocked_reason || "Esta vaga não tem método de envio automático.";
+      return record.send_blocked_reason || t("send.reasonUnsupported");
     case "blocked":
-      return record.send_blocked_reason || "O agente bloqueou o envio desta vaga.";
+      return record.send_blocked_reason || t("send.reasonBlocked");
     default:
-      return "Estado de envio desconhecido.";
+      return t("send.reasonUnknown");
   }
 }
 
@@ -97,13 +100,18 @@ export function scoreTone(score: number | null) {
   return "text-muted-foreground";
 }
 
-export const DECISION_LABELS: Record<string, string> = {
-  apply: "Aplicar",
-  reject: "Rejeitada",
-  review: "Revisar",
-  reply: "Responder",
-  accept: "Aceitar",
-  pending: "Pendente"
-};
+export function decisionLabel(decision: string, t: Translate) {
+  const keys: Record<string, Parameters<Translate>[0]> = {
+    apply: "decision.apply",
+    reject: "decision.reject",
+    review: "decision.review",
+    reply: "decision.reply",
+    accept: "decision.accept",
+    pending: "decision.pending"
+  };
+  return keys[decision] ? t(keys[decision]) : decision;
+}
 
-export const WEEKDAY_LABELS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+export function weekdayLabel(day: number, t: Translate) {
+  return t(`weekday.${day}` as Parameters<Translate>[0]);
+}

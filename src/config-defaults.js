@@ -68,6 +68,13 @@ export const DEFAULTS = {
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo",
   profile_path: "./profile.json",
 
+  pause: {
+    enabled: true,
+    start: "22:00",
+    end: "08:00",
+    allow_manual_runs: true
+  },
+
   storage: {
     database_path: "./data/semantic-memory.sqlite",
     legacy_state_path: "./state.json"
@@ -203,6 +210,11 @@ export const DEFAULTS = {
 export const EDITABLE = [
   { path: "timezone", type: "string", label: "Fuso horário" },
 
+  { path: "pause.enabled", type: "boolean", label: "Ativar pausa global" },
+  { path: "pause.start", type: "clock", label: "Início da pausa" },
+  { path: "pause.end", type: "clock", label: "Fim da pausa" },
+  { path: "pause.allow_manual_runs", type: "boolean", label: "Permitir execução manual durante a pausa" },
+
   { path: "browser.headless", type: "boolean", label: "Navegador em segundo plano" },
   { path: "browser.slow_mo_ms", type: "int", min: 0, max: 5000, label: "Atraso entre ações (ms)" },
   { path: "browser.navigation_timeout_ms", type: "int", min: 5000, max: 180000, label: "Timeout de navegação (ms)" },
@@ -280,6 +292,22 @@ export function coerceEditable(path, value) {
     case "string": {
       const text = String(value ?? "").trim().slice(0, 200);
       if (!text) throw new Error(`${field.label}: não pode ficar vazio`);
+      if (path === "timezone") {
+        try {
+          new Intl.DateTimeFormat("en", { timeZone: text }).format(new Date());
+        } catch {
+          throw new Error(`${field.label}: fuso IANA inválido`);
+        }
+      }
+      return text;
+    }
+
+    case "clock": {
+      const text = String(value ?? "").trim();
+      const match = /^(\d{2}):(\d{2})$/.exec(text);
+      if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) {
+        throw new Error(`${field.label}: use HH:MM`);
+      }
       return text;
     }
 

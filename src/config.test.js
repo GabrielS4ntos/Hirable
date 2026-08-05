@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { AppStore } from "./app-store.js";
 import { DEFAULTS, EDITABLE_BY_PATH, HARD_LIMITS, SAFETY, coerceEditable, getPath, setPath } from "./config-defaults.js";
-import { importLegacyConfig, resolveConfig } from "./config.js";
+import { importLegacyConfig, migratePauseConfigV1, resolveConfig } from "./config.js";
 
 function freshStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "config-"));
@@ -25,6 +25,14 @@ test("a fresh install resolves a usable config with no files", () => {
   assert.equal(config.jobs_watcher.easy_apply_enabled, true);
   assert.equal(config.model_gate.provider, "gemini");
   assert.ok(config.timezone);
+  assert.deepEqual(config.pause, DEFAULTS.pause);
+});
+
+test("pause settings are editable clocks with strict syntax", () => {
+  assert.equal(coerceEditable("pause.start", "22:00"), "22:00");
+  assert.throws(() => coerceEditable("pause.start", "8:00"), /HH:MM/);
+  assert.throws(() => coerceEditable("pause.end", "24:00"), /HH:MM/);
+  assert.equal(coerceEditable("pause.allow_manual_runs", false), false);
 });
 
 test("database overrides win over the defaults", () => {
@@ -208,4 +216,24 @@ test("path helpers handle nested creation and missing branches", () => {
   assert.equal(getPath(target, "a.b.c"), 1);
   assert.equal(getPath(target, "a.x.y"), undefined);
   assert.equal(getPath({}, "nada"), undefined);
+});
+
+test("pause migration atomically initializes config and clears only legacy windows", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.updateSchedule("network", { window_start: "08:00", window_end: "22:00" });
+    store.updateSchedule("dm", { window_start: "09:00", window_end: "18:00" });
+    store.updateSchedule("jobs", { window_start: "08:00", window_end: "22:00" });
+    const result = migratePauseConfigV1(store, new Date("2026-08-05T10:00:00Z"));
+    assert.equal(result.migrated, true);
+    assert.equal(result.cleared_windows, 2);
+    assert.deepEqual(store.getConfigOverrides().pause, DEFAULTS.pause);
+    assert.equal(store.getSchedule("network").window_start, "");
+    assert.equal(store.getSchedule("jobs").window_end, "");
+    assert.equal(store.getSchedule("dm").window_start, "09:00");
+    assert.equal(store.getSetting("pause_config_v1_migrated_at"), "2026-08-05T10:00:00.000Z");
+    assert.equal(migratePauseConfigV1(store).migrated, false);
+  } finally {
+    cleanup();
+  }
 });

@@ -114,6 +114,79 @@ export function importLegacyConfig(store, { filePath = LEGACY_CONFIG_PATH } = {}
   return { imported: true, count, skipped };
 }
 
+/**
+ * Moves the former implicit 08:00-22:00 lock into an explicit global pause.
+ * The marker, configuration and matching legacy schedule windows are committed
+ * together so a crash cannot leave a half-migrated scheduler.
+ */
+export function migratePauseConfigV1(store, now = new Date()) {
+  const marker = "pause_config_v1_migrated_at";
+  if (store.getSetting(marker)) return { migrated: false, reason: "ja_migrado" };
+
+  store.db.exec("BEGIN IMMEDIATE");
+  try {
+    const overrides = structuredClone(store.getConfigOverrides());
+    overrides.pause = { ...structuredClone(DEFAULTS.pause), ...(overrides.pause || {}) };
+    store.setConfigOverrides(overrides);
+    const result = store.db.prepare(`
+      UPDATE pipeline_schedules
+      SET window_start = '', window_end = '', updated_at = ?
+      WHERE pipeline IN ('network', 'dm', 'jobs') AND window_start = '08:00' AND window_end = '22:00'
+    `).run(now.toISOString());
+    store.setSetting(marker, now.toISOString());
+    store.db.exec("COMMIT");
+    return { migrated: true, cleared_windows: Number(result.changes || 0) };
+  } catch (error) {
+    store.db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/**
+ * Gives roles to providers that already had keys before roles existed.
+ *
+ * Without this an upgraded install would have keys but no primary, and every
+ * model call would fail. The legacy `model_gate` names decide the mapping when
+ * they are present; otherwise the oldest configured provider becomes primary.
+ */
+export function migrateProviderRolesV1(store, config) {
+  const marker = "provider_roles_v1_migrated_at";
+  if (store.getSetting(marker)) return { migrated: false, reason: "ja_migrado" };
+
+  const providers = store.listProviders();
+  const configured = providers.filter((provider) => provider.configured);
+  if (!configured.length) {
+    // Nothing to migrate, but do not run this again on every boot.
+    store.setSetting(marker, new Date().toISOString());
+    return { migrated: false, reason: "sem_chaves" };
+  }
+
+  if (providers.some((provider) => provider.role !== "none")) {
+    store.setSetting(marker, new Date().toISOString());
+    return { migrated: false, reason: "papeis_ja_definidos" };
+  }
+
+  const legacyPrimary = configured.find((provider) => provider.id === config?.model_gate?.provider);
+  const legacyFallback = configured.find((provider) => provider.id === config?.model_gate?.fallback_provider);
+  const primary = legacyPrimary || configured[0];
+
+  store.setProviderRole(primary.id, "primary");
+  if (legacyFallback && legacyFallback.id !== primary.id) store.setProviderRole(legacyFallback.id, "fallback");
+
+  // Carry over the models the legacy configuration was using.
+  const legacyModels = {
+    gemini: config?.model_gate?.job_model || config?.model_gate?.validator_model,
+    openrouter: config?.model_gate?.openrouter_model
+  };
+  for (const provider of configured) {
+    const model = legacyModels[provider.id];
+    if (model) store.setProviderModel(provider.id, model);
+  }
+
+  store.setSetting(marker, new Date().toISOString());
+  return { migrated: true, primary: primary.id, fallback: legacyFallback?.id || null };
+}
+
 function deepClone(value) {
   return structuredClone(value);
 }

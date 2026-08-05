@@ -25,6 +25,8 @@ to the model provider.
   - [Node (local)](#node-local)
 - [First-run setup](#first-run-setup)
 - [Configuration](#configuration)
+- [Model providers](#model-providers)
+- [Résumés](#résumés)
 - [Scheduling](#scheduling)
 - [Safety model](#safety-model)
 - [Architecture](#architecture)
@@ -56,14 +58,16 @@ Three decisions follow from that:
 |---|---|
 | **Dashboard** — counters, per-pipeline status and run history | **Analyzed jobs** — every item in one table with a send button |
 | <img src="docs/screenshots/dashboard.jpg" alt="Dashboard" width="100%"> | <img src="docs/screenshots/jobs.jpg" alt="Analyzed jobs" width="100%"> |
-| **Onboarding** — paste a résumé, an agent fills the profile | **Settings** — Google integration and pipeline behaviour |
-| <img src="docs/screenshots/onboarding.jpg" alt="Onboarding" width="100%"> | <img src="docs/screenshots/settings-pipelines.jpg" alt="Pipeline settings" width="100%"> |
+| **Onboarding** — configure a provider, paste a résumé, an agent fills the profile | **Provider setup** — key, model and role in one dialog |
+| <img src="docs/screenshots/onboarding.jpg" alt="Onboarding" width="100%"> | <img src="docs/screenshots/provider-dialog.jpg" alt="Provider dialog" width="100%"> |
+| **Settings** — Google integration and pipeline behaviour | **Analyzed jobs** — send state per row |
+| <img src="docs/screenshots/settings-pipelines.jpg" alt="Pipeline settings" width="100%"> | <img src="docs/screenshots/jobs.jpg" alt="Analyzed jobs" width="100%"> |
 
 ## Requirements
 
 - **Node.js 22.5+** — the app uses the built-in `node:sqlite` module.
-- **A Gemini API key** (free tier is enough to start). An OpenRouter key is optional and
-  used as a fallback when Gemini returns a quota error.
+- **An API key** for Google Gemini, OpenAI or OpenRouter. A second provider is optional and
+  becomes the automatic fallback when the first hits its quota.
 - **A LinkedIn account**, logged in once through the app's persistent browser profile.
 - Docker, if you prefer the container route.
 
@@ -107,16 +111,20 @@ There are no files to edit. The console walks you through it:
 
 1. **Onboarding.** Paste your résumé and press **Preencher**. An agent extracts your
    profile — contact details, target roles, years per technology, experience, education —
-   using the provider's structured-output mode, and shows it for review. Nothing is saved
-   until you confirm, and sensitive fields stay blank unless the résumé states them
-   explicitly.
-2. **API keys.** Add one or more Gemini keys under *Chaves de API*. Several keys are
-   consumed round-robin; an OpenRouter key becomes the fallback when they all hit quota.
-3. **Job searches.** Under *Configurações*, paste the LinkedIn search URLs you want scanned
+   using the provider's structured-output mode, and fills the form for review. Nothing is
+   saved until you confirm, and sensitive fields stay blank unless the résumé states them
+   explicitly. The onboarding and the profile screen are the same form, so nothing you
+   learn here has to be relearned later.
+2. **Model provider.** Configure Gemini, OpenAI or OpenRouter right on the onboarding
+   screen — the **Preencher** button stays disabled until one is set. The first provider
+   becomes the primary; a second becomes its fallback automatically.
+3. **Résumé files.** Upload the documents you want attached to emails and selected in Easy
+   Apply. Each is summarized once so the agent can pick the right one per job.
+4. **Job searches.** Under *Configurações*, paste the LinkedIn search URLs you want scanned
    (open a LinkedIn job search with your filters applied and copy the address bar).
-4. **LinkedIn login.** Run `npm run dm:check:headed` once and log in. The session persists
+5. **LinkedIn login.** Run `npm run dm:check:headed` once and log in. The session persists
    in `.browser-profile`.
-5. **Turn on a schedule.** Pipelines start in *manual*. Switch one to *automatic* when you
+6. **Turn on a schedule.** Pipelines start in *manual*. Switch one to *automatic* when you
    are comfortable with what it is doing.
 
 Optionally, connect Google under *Configurações* to receive alert emails and to have
@@ -148,6 +156,47 @@ Two things are deliberately **not** editable through the interface:
 
 The configuration API accepts only paths on an explicit whitelist, validates each value on
 its own, and applies the valid ones even when a sibling is rejected.
+
+## Model providers
+
+Three providers are supported — **Google Gemini**, **OpenAI** and **OpenRouter** — each with
+its own key, model and role:
+
+| Role | Meaning |
+|---|---|
+| `primary` | every model call goes here first |
+| `fallback` | takes over when the primary fails with a quota or rate error |
+| `none` | configured but idle |
+
+Roles settle themselves: the first provider you configure becomes the primary, the second
+automatically becomes its fallback, and a third stays idle until you promote it. Gemini
+accepts several keys and consumes them round-robin to stretch a free tier.
+
+Keys are stored in the local SQLite file (`chmod 600`). The interface only ever receives a
+masked value — never a key — and provider error messages are redacted before display.
+Environment variables (`GEMINI_API_KEYS`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`) remain a
+fallback for installs that never used the interface.
+
+## Résumés
+
+Upload your résumé files under **Perfil**. The document itself stays on disk and is what gets
+attached to an email or selected in the Easy Apply form.
+
+Choosing which résumé fits a job is the interesting part. The obvious approach — sending the
+full text of every résumé with every job evaluation — costs N résumés × M jobs × thousands of
+tokens on every scan. Instead:
+
+1. **Once per upload**, one model call summarizes the file into a compact index: headline,
+   roles, technologies, seniority. `.docx`, `.txt`, `.md` and `.rtf` are read automatically
+   (no third-party parser: a `.docx` is a ZIP, and only `word/document.xml` is needed). A
+   `.pdf` is stored and attached, but you describe it in the label.
+2. **Per job**, matching is keyword affinity against that index — no model call at all.
+3. The job evaluator, which already runs per job, additionally receives the one-line
+   summaries (~30 tokens each) and may name a résumé; when it does, its choice wins, because
+   it read the full description.
+
+A tie, or no signal, falls back to the résumé marked as default, so the choice is predictable
+rather than arbitrary.
 
 ## Scheduling
 

@@ -1,6 +1,7 @@
 import { ExternalLink } from "lucide-react";
 import type { AgentRecord } from "@/lib/api";
-import { DECISION_LABELS, SEND_STATE_LABELS, SEND_STATE_VARIANTS, formatFullDateTime, sendDisabledReason } from "@/lib/format";
+import { SEND_STATE_VARIANTS, decisionLabel, formatFullDateTime, sendDisabledReason, sendStateLabel } from "@/lib/format";
+import { useI18n } from "@/lib/i18n";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,8 +15,9 @@ export function RecordDetailDialog({
   record: AgentRecord | null;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t, locale } = useI18n();
   if (!record) return null;
-  const reason = sendDisabledReason(record);
+  const reason = sendDisabledReason(record, t, locale);
 
   return (
     <Dialog open={Boolean(record)} onOpenChange={onOpenChange}>
@@ -28,8 +30,8 @@ export function RecordDetailDialog({
         </DialogHeader>
 
         <div className="flex flex-wrap gap-2">
-          <Badge variant={SEND_STATE_VARIANTS[record.send_state]}>{SEND_STATE_LABELS[record.send_state]}</Badge>
-          <Badge variant="outline">decisão: {DECISION_LABELS[record.decision] ?? record.decision}</Badge>
+          <Badge variant={SEND_STATE_VARIANTS[record.send_state]}>{sendStateLabel(record.send_state, t)}</Badge>
+          <Badge variant="outline">decisão: {decisionLabel(record.decision, t)}</Badge>
           <Badge variant="outline">pipeline: {record.pipeline}</Badge>
           <Badge variant="outline">método: {record.send_method}</Badge>
           {record.variant ? <Badge variant="outline">currículo: {record.variant}</Badge> : null}
@@ -45,8 +47,8 @@ export function RecordDetailDialog({
           <Field label="Confiança do modelo" value={record.confidence === null ? "—" : `${record.confidence}%`} />
           <Field label="Origem" value={record.source || "—"} />
           <Field label="ID externo" value={record.external_id} mono />
-          <Field label="Analisada em" value={formatFullDateTime(record.analyzed_at)} />
-          <Field label="Enviada em" value={record.sent_at ? `${formatFullDateTime(record.sent_at)} (${record.sent_by})` : "—"} />
+          <Field label="Analisada em" value={formatFullDateTime(record.analyzed_at, locale)} />
+          <Field label="Enviada em" value={record.sent_at ? `${formatFullDateTime(record.sent_at, locale)} (${record.sent_by})` : "—"} />
         </dl>
 
         {reason ? (

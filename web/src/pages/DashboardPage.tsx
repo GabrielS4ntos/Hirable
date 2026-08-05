@@ -10,9 +10,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
+import { localizedError, pipelineLabel, useI18n } from "@/lib/i18n";
 
 export function DashboardPage({ status, refreshStatus }: PageProps) {
   const toast = useToast();
+  const { t, locale } = useI18n();
   const runs = usePolling(() => api.listRuns(), 5000);
   const [starting, setStarting] = React.useState<string | null>(null);
 
@@ -23,11 +25,11 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
     setStarting(pipeline);
     try {
       await api.runPipeline(pipeline);
-      toast({ title: "Execução enfileirada", description: pipeline, variant: "success" });
+      toast({ title: t("dashboard.queuedToast"), description: pipelineLabel(pipeline, pipeline, locale), variant: "success" });
       refreshStatus();
       await runs.refresh();
     } catch (error) {
-      toast({ title: "Não foi possível executar", description: (error as Error).message, variant: "error" });
+      toast({ title: t("dashboard.runError"), description: localizedError(error, t, locale), variant: "error" });
     } finally {
       setStarting(null);
     }
@@ -36,18 +38,18 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
   return (
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard label="Vagas analisadas" value={totalJobs} hint="registros padronizados no banco" />
-        <MetricCard label="Prontas para envio" value={jobCounts.available ?? 0} tone="primary" hint="aguardando sua decisão" />
+        <MetricCard label={t("dashboard.jobsAnalyzed")} value={totalJobs} hint={t("dashboard.standardRecords")} />
+        <MetricCard label={t("dashboard.ready")} value={jobCounts.available ?? 0} tone="primary" hint={t("dashboard.awaitingDecision")} />
         <MetricCard
-          label="Candidaturas enviadas"
+          label={t("dashboard.sent")}
           value={(jobCounts.sent_auto ?? 0) + (jobCounts.sent_manual ?? 0)}
           tone="success"
-          hint={`${jobCounts.sent_auto ?? 0} automáticas · ${jobCounts.sent_manual ?? 0} manuais`}
+          hint={t("dashboard.sentHint", { auto: jobCounts.sent_auto ?? 0, manual: jobCounts.sent_manual ?? 0 })}
         />
         <MetricCard
-          label="Pipelines automáticos"
+          label={t("dashboard.autoPipelines")}
           value={status?.schedules.filter((item) => item.mode === "auto").length ?? 0}
-          hint={`de ${status?.schedules.length ?? 0} configurados`}
+          hint={t("dashboard.configured", { count: status?.schedules.length ?? 0 })}
         />
       </div>
 
@@ -56,11 +58,11 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
           <Card key={schedule.pipeline}>
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center justify-between gap-2 text-sm">
-                {schedule.label}
+                {pipelineLabel(schedule.pipeline, schedule.label, locale)}
                 <Badge
                   variant={schedule.mode === "auto" ? "success" : schedule.mode === "off" ? "secondary" : "outline"}
                 >
-                  {schedule.mode === "auto" ? "automático" : schedule.mode === "off" ? "desativado" : "manual"}
+                  {schedule.mode === "auto" ? t("dashboard.auto") : schedule.mode === "off" ? t("dashboard.off") : t("dashboard.manual")}
                 </Badge>
               </CardTitle>
               <CardDescription className="font-mono text-xs">{schedule.summary}</CardDescription>
@@ -69,17 +71,17 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
               <div className="space-y-1 text-xs text-muted-foreground">
                 <p className="flex items-center gap-1.5">
                   <CalendarClock className="size-3.5" />
-                  Próxima:{" "}
+                  {t("dashboard.next")}{" "}
                   <span className="font-mono text-foreground">
-                    {schedule.mode === "auto" ? formatRelative(schedule.next_run_at) : "—"}
+                    {schedule.mode === "auto" ? formatRelative(schedule.next_run_at, locale) : "—"}
                   </span>
                 </p>
                 <p>
-                  Última execução: <span className="font-mono">{formatDateTime(schedule.last_run_at)}</span>
+                  {t("dashboard.lastRun")} <span className="font-mono">{formatDateTime(schedule.last_run_at, locale, status?.timezone)}</span>
                 </p>
                 {schedule.last_status ? (
                   <p className="line-clamp-1">
-                    Status: <span className="font-mono">{schedule.last_status}</span>
+                    {t("dashboard.status")} <span className="font-mono">{schedule.last_status}</span>
                   </p>
                 ) : null}
               </div>
@@ -91,7 +93,7 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
                 onClick={() => runNow(schedule.pipeline)}
               >
                 {starting === schedule.pipeline ? <Loader2 className="animate-spin" /> : <Play />}
-                Executar agora
+                {t("dashboard.runNow")}
               </Button>
             </CardContent>
           </Card>
@@ -100,40 +102,40 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Execuções recentes</CardTitle>
-          <CardDescription>Histórico gravado pelo scheduler, incluindo envios manuais disparados na tela de vagas.</CardDescription>
+          <CardTitle>{t("dashboard.recentRuns")}</CardTitle>
+          <CardDescription>{t("dashboard.recentRunsDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Pipeline</TableHead>
-                <TableHead className="w-24">Origem</TableHead>
-                <TableHead className="w-28">Status</TableHead>
-                <TableHead className="w-36">Início</TableHead>
-                <TableHead className="w-24">Duração</TableHead>
-                <TableHead>Resumo</TableHead>
+                <TableHead>{t("dashboard.pipeline")}</TableHead>
+                <TableHead className="w-24">{t("dashboard.origin")}</TableHead>
+                <TableHead className="w-28">{t("dashboard.status")}</TableHead>
+                <TableHead className="w-36">{t("dashboard.start")}</TableHead>
+                <TableHead className="w-24">{t("dashboard.duration")}</TableHead>
+                <TableHead>{t("dashboard.summary")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {(runs.data?.items ?? []).length === 0 ? (
                 <TableRow className="hover:bg-transparent">
                   <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
-                    Nenhuma execução registrada ainda.
+                    {t("dashboard.noRuns")}
                   </TableCell>
                 </TableRow>
               ) : null}
               {(runs.data?.items ?? []).map((run) => (
                 <TableRow key={run.id}>
-                  <TableCell className="font-medium">{run.pipeline}</TableCell>
+                  <TableCell className="font-medium">{pipelineLabel(run.pipeline, run.pipeline, locale)}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">{run.trigger}</TableCell>
                   <TableCell>
                     <Badge variant={statusVariant(run.status)}>{run.status}</Badge>
                   </TableCell>
                   <TableCell className="text-xs whitespace-nowrap text-muted-foreground">
-                    {formatFullDateTime(run.started_at)}
+                    {formatFullDateTime(run.started_at, locale, status?.timezone)}
                   </TableCell>
-                  <TableCell className="font-mono text-xs tabular-nums">{formatDuration(run.duration_ms)}</TableCell>
+                  <TableCell className="font-mono text-xs tabular-nums">{formatDuration(run.duration_ms, locale)}</TableCell>
                   <TableCell className="max-w-md">
                     <span className="line-clamp-1 font-mono text-xs text-muted-foreground">{summarize(run)}</span>
                   </TableCell>

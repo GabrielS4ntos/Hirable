@@ -52,7 +52,9 @@ test("disabled keys are excluded from the active rotation", () => {
 test("api key validation rejects bad providers and short secrets", () => {
   const { store, cleanup } = freshStore();
   try {
-    assert.throws(() => store.createApiKey({ provider: "openai", secret: "long-enough-secret" }), /provider/);
+    // OpenAI is a supported provider now; an unknown one still fails.
+    assert.throws(() => store.createApiKey({ provider: "anthropic", secret: "long-enough-secret" }), /provider/);
+    assert.doesNotThrow(() => store.createApiKey({ provider: "openai", label: "o", secret: "sk-proj-abcdefgh" }));
     assert.throws(() => store.createApiKey({ provider: "gemini", secret: "tiny" }), /too short/);
   } finally {
     cleanup();
