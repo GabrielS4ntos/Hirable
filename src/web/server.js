@@ -18,6 +18,7 @@ import { extractDocumentText } from "../document-text.js";
 import { PROFILE_GATE_CODE, profileGateState, resetProfileGateCache } from "../profile-gate.js";
 import { assertLaunchAllowed, sandboxEnv } from "../auto-fix-sandbox.js";
 import { detectSupervisor } from "../service-restart.js";
+import { RESUME_GATE_CODE, evaluateResumeGate } from "../resume-gate.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), "..", "..");
@@ -83,6 +84,14 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
   const route = (method, pattern, handler) => routes.push({ method, pattern, handler });
 
   const profileGate = () => profileGateState(store, getConfig());
+  const resumeGate = () => evaluateResumeGate(store.listResumes());
+
+  /** Refuses anything that would submit an application without a résumé to attach. */
+  const requireResume = () => {
+    const gate = resumeGate();
+    if (!gate.ready) throw new HttpError(409, gate.reason, RESUME_GATE_CODE);
+    return gate;
+  };
 
   /** Refuses anything that would start or arm a pipeline with an unfilled profile. */
   const requireProfile = () => {
@@ -110,6 +119,7 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
       pause: pauseStatus(config),
       onboarding: { complete: onboardingComplete },
       profile_gate: profileGate(),
+      resume_gate: resumeGate(),
       scheduler: scheduler.status(),
       schedules,
       counts: {
@@ -455,7 +465,8 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
       schedule_error: nextRunOutsidePause(schedule, getConfig()).error
     })),
     available: PIPELINES,
-    profile_gate: profileGate()
+    profile_gate: profileGate(),
+    resume_gate: resumeGate()
   }));
 
   route("PUT", /^\/api\/pipelines\/([\w-]+)$/, async (req, res, [pipeline]) => {
@@ -520,6 +531,7 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
 
   route("POST", /^\/api\/records\/([\w-]+)\/send$/, (req, res, [id]) => {
     requireProfile();
+    requireResume();
     const record = store.getAgentRecord(id);
     if (!record) throw new HttpError(404, "registro não encontrado");
     if (!["available", "failed"].includes(record.send_state)) {

@@ -241,6 +241,21 @@ a single table. `send_state` drives the button:
 Hovering a disabled button shows the exact reason. A rescan never downgrades a record that
 was already sent, so an application cannot be submitted twice.
 
+**No résumé, no application.** Easy Apply and the job digest both put a document in front of a
+recruiter, so both refuse to run while the database holds none — otherwise the only options
+would be submitting whatever LinkedIn happened to have preselected, or emailing an alert that
+promises an attachment it cannot produce. Scanning and evaluating stay available: they send
+nothing.
+
+At the résumé step the agent expands the full list, looks for the chosen document among the
+entries LinkedIn already has, and selects it. Only when it genuinely is not there does it
+upload the stored file — LinkedIn caps how many résumés an account keeps, so uploading on
+every application would pile up duplicates; the upload is a first-use bootstrap, not a routine
+step. Matching tolerates the name being truncated by the interface but never accepts a short
+prefix standing in for a longer name, because "CV" matching "CV_antigo_2019" is how the wrong
+document gets submitted. The selection is verified afterwards, and an unverified one is
+reported rather than assumed.
+
 **Restricted vacancies.** A résumé cannot be trusted to state whether you belong to an
 affirmative-action group. A deterministic guard blocks any vacancy exclusive to a group your
 profile does not explicitly declare — silence is never a yes — and the same gate runs on the

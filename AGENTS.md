@@ -99,6 +99,14 @@ single Chromium profile (`.browser-profile`). `network` and `dm` are paired five
 when both are on the same `daily_times` cycle; pairing is an optimization, and any other valid
 combination must fall back to independent scheduling rather than reporting an error.
 
+**Résumés.** `resume-gate.js` blocks Easy Apply and the digest email when no document is
+stored; scanning stays allowed because it sends nothing. `resume-selection.js` holds the
+résumé step of the form and is separate from `cli.js` precisely so the decision flow — expand,
+look, select or upload, verify — can be tested against a fake page. Selection is verified after
+the click: an unverified selection is the one failure that silently submits the wrong document.
+The matching rules in `resume-upload.js` accept LinkedIn's truncation but refuse a short prefix
+standing in for a longer name; loosening that is how the wrong résumé gets attached.
+
 **Alerts and auto-fix.** `alert-dedupe.js` fingerprints a failure by command, status and a
 normalized message (ids, paths, timestamps and numbers stripped) so repeats collapse into one
 group; `AppStore.recordAlert` counts the occurrence and decides delivery inside a

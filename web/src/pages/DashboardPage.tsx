@@ -22,6 +22,9 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
   const jobCounts = status?.counts.job ?? {};
   const totalJobs = Object.values(jobCounts).reduce((sum, value) => sum + value, 0);
   const gate = status?.profile_gate ?? null;
+  // Scanning without a résumé is allowed — it sends nothing — so only the
+  // profile gate disables "Run now"; the résumé gate is informational here.
+  const resumeGate = status?.resume_gate ?? null;
   const gateBlocked = Boolean(gate && !gate.ready);
 
   async function runNow(pipeline: string) {
@@ -40,7 +43,7 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
 
   return (
     <div className="space-y-6">
-      <ProfileGateBanner gate={gate} onGoToProfile={() => { window.location.hash = "/perfil"; }} />
+      <ProfileGateBanner gate={gate} resumeGate={resumeGate} onGoToProfile={() => { window.location.hash = "/perfil"; }} />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label={t("dashboard.jobsAnalyzed")} value={totalJobs} hint={t("dashboard.standardRecords")} />

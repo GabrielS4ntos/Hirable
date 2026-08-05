@@ -41,10 +41,11 @@ const CRON_PRESETS = [
 export function SettingsPage(_props: PageProps) {
   const pipelines = usePolling(api.listPipelines, 8000);
   const gate = pipelines.data?.profile_gate ?? null;
+  const resumeGate = pipelines.data?.resume_gate ?? null;
 
   return (
     <div className="space-y-6">
-      <ProfileGateBanner gate={gate} onGoToProfile={() => { window.location.hash = "/perfil"; }} />
+      <ProfileGateBanner gate={gate} resumeGate={resumeGate} onGoToProfile={() => { window.location.hash = "/perfil"; }} />
 
       <GoogleIntegrationCard />
 

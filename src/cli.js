@@ -28,6 +28,9 @@ import { bootstrapDatabasePath, resolveConfig } from "./config.js";
 import { canStartDuringPause } from "./pause.js";
 import { PROFILE_GATE_CODE, profileGateState } from "./profile-gate.js";
 import { DEFAULT_DEDUPE_MINUTES } from "./alert-dedupe.js";
+import { RESUME_GATE_CODE, evaluateResumeGate } from "./resume-gate.js";
+import { canUploadResume } from "./resume-upload.js";
+import { ensureResumeSelected } from "./resume-selection.js";
 import { renderAlertEmail } from "./email-template.js";
 import { runAutoFix } from "./auto-fix.js";
 import {
@@ -223,6 +226,27 @@ async function skipIfProfileIncomplete(pipeline, config) {
     status: "skipped",
     code: PROFILE_GATE_CODE,
     missing_fields: gate.missing,
+    message: gate.reason
+  };
+  await appendRunLog(result);
+  console.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
+/**
+ * Refuses an Easy Apply run when no résumé is stored.
+ *
+ * Scanning and evaluating stay allowed — they send nothing — but anything that
+ * submits an application needs a document to attach.
+ */
+async function skipIfNoResume(pipeline, config) {
+  const gate = evaluateResumeGate(listIndexedResumes(config));
+  if (gate.ready) return null;
+  const result = {
+    run_at: nowIso(),
+    pipeline,
+    status: "skipped",
+    code: RESUME_GATE_CODE,
     message: gate.reason
   };
   await appendRunLog(result);
@@ -947,6 +971,26 @@ function listIndexedResumes(config) {
 /** Absolute path of an uploaded résumé on disk. */
 function resumeFilePath(config, resume) {
   return path.resolve(ROOT, path.dirname(localDatabasePath(config)), "resumes", resume.stored_name);
+}
+
+/**
+ * Whether the chosen résumé can be uploaded to LinkedIn, and from where.
+ *
+ * Returns the reason when it cannot, so the audit trail says "the .txt file
+ * cannot be attached" instead of only "résumé not found".
+ */
+function resolveResumeUpload(resume, config) {
+  if (!resume) return { enabled: false, filePath: null, reason: "sem_curriculo_indexado" };
+
+  const filePath = resumeFilePath(config, resume);
+  if (!fsSync.existsSync(filePath)) {
+    return { enabled: false, filePath: null, reason: "arquivo_ausente_no_disco" };
+  }
+
+  const allowed = canUploadResume(resume, fsSync.statSync(filePath).size);
+  if (!allowed.ok) return { enabled: false, filePath, reason: allowed.reason };
+
+  return { enabled: true, filePath, reason: null };
 }
 
 /**
@@ -2653,49 +2697,7 @@ async function extractJobsFromPage(page, searchName, config) {
   return Array.from(allById.values()).slice(0, config.jobs_watcher.max_jobs_per_search);
 }
 
-async function selectResumeIfVisible(page, resumeDisplayName) {
-  const body = await page.locator("body").innerText({ timeout: 5000 }).catch(() => "");
-  const resumeSectionVisible = /resume|currículo|curriculo/i.test(body);
-  const expandButtons = await page.getByRole("button", { name: /\+\d+\s+(currículos?|curriculos?|resumes?)/i }).all();
-  for (const expandButton of expandButtons) {
-    if (await expandButton.isVisible().catch(() => false)) {
-      await expandButton.click({ timeout: 4000 }).catch(() => {});
-      await page.waitForTimeout(300);
-    }
-  }
-  const expandedBody = await page.locator("body").innerText({ timeout: 5000 }).catch(() => body);
-  if (!body.includes(resumeDisplayName)) {
-    if (!expandedBody.includes(resumeDisplayName)) {
-    return {
-      ok: !resumeSectionVisible,
-      confirmed: false,
-      reason: resumeSectionVisible ? "resume_section_visible_but_expected_resume_not_found" : "resume_not_visible_yet",
-      resume_display_name: resumeDisplayName,
-      body_sample: expandedBody.slice(0, 1200)
-    };
-    }
-  }
 
-  const selectButton = page.getByRole("button", { name: new RegExp(`Selecionar resume ${escapeRegex(resumeDisplayName)}|Select resume ${escapeRegex(resumeDisplayName)}`, "i") }).first();
-  if (await selectButton.count().catch(() => 0)) {
-    await selectButton.click({ timeout: 5000 });
-    return { ok: true, confirmed: true, selected_now: true, resume_display_name: resumeDisplayName };
-  }
-
-  const unselectButton = page.getByRole("button", { name: new RegExp(`Desmarcar seleção de resume ${escapeRegex(resumeDisplayName)}|Unselect resume ${escapeRegex(resumeDisplayName)}`, "i") }).first();
-  if (await unselectButton.count().catch(() => 0)) {
-    return { ok: true, confirmed: true, already_selected: true, resume_display_name: resumeDisplayName };
-  }
-
-  const resumeOption = page.getByText(resumeDisplayName, { exact: false }).first();
-  if (await resumeOption.count().catch(() => 0)) {
-    await resumeOption.click({ timeout: 3000 }).catch(() => {});
-    const selectedAfterClick = await page.getByRole("button", { name: new RegExp(`Desmarcar seleção de resume ${escapeRegex(resumeDisplayName)}|Unselect resume ${escapeRegex(resumeDisplayName)}`, "i") }).count().catch(() => 0);
-    return { ok: true, confirmed: true, clicked_text: true, selected_control_detected: Boolean(selectedAfterClick), resume_display_name: resumeDisplayName };
-  }
-
-  return { ok: false, confirmed: false, reason: "resume_text_found_but_selection_control_not_confirmed", resume_display_name: resumeDisplayName, body_sample: body.slice(0, 1200) };
-}
 
 async function fillLinkedInAutocomplete(page, input, value) {
   await input.fill(value, { timeout: 3000 });
@@ -3209,11 +3211,26 @@ async function attemptEasyApply(page, job, config, modelEvaluation = null) {
   const profile = await loadProfile(config);
   const resumeType = modelEvaluation?.resume_type || chooseResumeType(job);
 
+  // No stored résumé means the only alternatives are submitting whatever
+  // LinkedIn preselected or uploading nothing at all. Neither is acceptable.
+  const gate = evaluateResumeGate(listIndexedResumes(config));
+  if (!gate.ready) {
+    return {
+      status: "blocked",
+      reason: RESUME_GATE_CODE,
+      audit: { job_id: job.external_id, title: job.title, url: job.url, blocked_reason: gate.reason, steps: [] }
+    };
+  }
+
   // An uploaded and indexed résumé wins; the legacy resume_display_names map is
   // the fallback for installs that never uploaded one.
   const picked = resolveResumeForJob(job, config, modelEvaluation);
   const resumeDisplayName = picked.resume?.original_name
     || config.jobs_watcher.resume_display_names[resumeType];
+
+  // Resolved before navigating: a file LinkedIn would reject is worth knowing
+  // about now, not with the application half filled in.
+  const resumeUpload = resolveResumeUpload(picked.resume, config);
 
   const audit = {
     job_id: job.external_id,
@@ -3275,8 +3292,12 @@ async function attemptEasyApply(page, job, config, modelEvaluation = null) {
       await page.waitForTimeout(300);
     }
 
-    const resume = await selectResumeIfVisible(page, resumeDisplayName);
-    audit.steps.push({ step: `resume_${step}`, ...resume });
+    const resume = await ensureResumeSelected(page, {
+      displayName: resumeDisplayName,
+      filePath: resumeUpload.filePath,
+      uploadEnabled: resumeUpload.enabled
+    });
+    audit.steps.push({ step: `resume_${step}`, ...resume, upload_available: resumeUpload.enabled });
     if (!resume.ok) return { status: "needs_review", reason: resume.reason, audit };
     resumeConfirmed ||= Boolean(resume.confirmed);
 
@@ -3689,7 +3710,12 @@ async function runJobsScan() {
     state.jobs.last_scan_match_count = allJobs.filter((job) => job.score >= config.jobs_watcher.selection_thresholds.default_min_score).length;
     const applicationResults = [];
     let appliedThisRun = 0;
-    const applyCandidates = allJobs.filter((job) => shouldAttemptEasyApply(job, config, state));
+    // Scanning and evaluating are always allowed; submitting is not, so a run
+    // without a stored résumé keeps producing records and applies to nothing.
+    const resumeGate = evaluateResumeGate(listIndexedResumes(config));
+    const applyCandidates = resumeGate.ready
+      ? allJobs.filter((job) => shouldAttemptEasyApply(job, config, state))
+      : [];
     const applyDecisionSample = allJobs.map((job) => explainEasyApplyDecision(job, config, state)).slice(0, 10);
     for (const job of applyCandidates) {
       if (appliedThisRun >= config.jobs_watcher.max_easy_apply_per_run) break;
@@ -3761,7 +3787,21 @@ async function runJobsScan() {
     await writeAppState(state, config);
 
     const emailState = emailDelivery(config);
-    if (emailState.enabled && emailState.settings?.job_digest_enabled) {
+    // The digest exists to carry the résumé the agent could not submit itself.
+    // With none stored it would promise an attachment it cannot produce, so the
+    // route is closed rather than sending an empty-handed email.
+    const digestGate = resumeGate;
+    if (emailState.enabled && emailState.settings?.job_digest_enabled && !digestGate.ready) {
+      await appendRunLog({
+        pipeline: "jobs",
+        run_at: nowIso(),
+        status: "skipped",
+        step: "job_digest_email",
+        code: RESUME_GATE_CODE,
+        message: digestGate.reason
+      });
+    }
+    if (emailState.enabled && emailState.settings?.job_digest_enabled && digestGate.ready) {
       const alertJobs = newJobs.filter((job) => !job.easy_apply || !shouldAttemptEasyApply(job, config, state));
       if (alertJobs.length > 0) {
         await sendGmail({
@@ -3786,6 +3826,7 @@ async function runJobsScan() {
       job_count: allJobs.length,
       new_job_count: newJobs.length,
       apply_candidate_count: applyCandidates.length,
+      apply_blocked_reason: resumeGate.ready ? undefined : resumeGate.code,
       apply_decision_sample: applyDecisionSample,
       new_jobs: newJobs.slice(0, 20),
       application_results: applicationResults
@@ -3804,6 +3845,8 @@ async function runJobsApplyOne(identifier = process.argv[3]) {
   const config = loadConfig();
   const blocked = await skipIfProfileIncomplete("jobs", config);
   if (blocked) return blocked;
+  const withoutResume = await skipIfNoResume("jobs", config);
+  if (withoutResume) return withoutResume;
   const paused = await skipIfPaused("jobs", config);
   if (paused) return paused;
   const target = String(identifier || "").trim();
@@ -3916,6 +3959,10 @@ async function runJobsApplyOne(identifier = process.argv[3]) {
 
 async function runJobsApply() {
   const config = loadConfig();
+  // This command exists to submit applications, so without a résumé there is
+  // nothing for it to do; jobs:scan remains available for scanning only.
+  const withoutResume = await skipIfNoResume("jobs", config);
+  if (withoutResume) return withoutResume;
   config.jobs_watcher.read_only = false;
   config.jobs_watcher.easy_apply_enabled = true;
   return runJobsScan();

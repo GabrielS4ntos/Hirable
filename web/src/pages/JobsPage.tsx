@@ -57,9 +57,12 @@ export function JobsPage({ status }: PageProps) {
 
   const items = records.data?.items ?? [];
   const counts = records.data?.counts ?? {};
-  // Manual sends run the same Easy Apply pipeline, so they follow the same gate.
+  // Manual sends run the same Easy Apply pipeline, so they follow the same gates:
+  // the profile the agent answers from, and the résumé it attaches.
   const gate = status?.profile_gate ?? null;
-  const gateBlocked = Boolean(gate && !gate.ready);
+  const resumeGate = status?.resume_gate ?? null;
+  const gateBlocked = Boolean(gate && !gate.ready) || Boolean(resumeGate && !resumeGate.ready);
+  const gateMessage = gate && !gate.ready ? "error.profile_incomplete" : "error.no_resume";
 
   async function handleSend(record: AgentRecord) {
     setSending((current) => new Set(current).add(record.record_id));
@@ -84,7 +87,7 @@ export function JobsPage({ status }: PageProps) {
 
   return (
     <div className="space-y-5">
-      <ProfileGateBanner gate={gate} onGoToProfile={() => { window.location.hash = "/perfil"; }} />
+      <ProfileGateBanner gate={gate} resumeGate={resumeGate} onGoToProfile={() => { window.location.hash = "/perfil"; }} />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryTile label={t("dashboard.ready")} value={counts.available ?? 0} tone="primary" />
@@ -244,7 +247,7 @@ export function JobsPage({ status }: PageProps) {
                             </TooltipTrigger>
                             <TooltipContent>
                               {gateBlocked
-                                ? t("error.profile_incomplete")
+                                ? t(gateMessage)
                                 : busy
                                   ? t("jobs.sendInProgress")
                                   : (disabledReason ?? t("jobs.sendEasyApply"))}

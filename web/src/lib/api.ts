@@ -151,11 +151,20 @@ export type ProfileGate = {
   onboarding_complete: boolean;
 };
 
+/** Easy Apply and the job digest both need a stored résumé to send. */
+export type ResumeGate = {
+  ready: boolean;
+  code: string | null;
+  reason: string | null;
+  count: number;
+};
+
 export type StatusPayload = {
   now: string;
   timezone: string;
   onboarding: { complete: boolean };
   profile_gate: ProfileGate;
+  resume_gate: ResumeGate;
   scheduler: {
     running: { pipeline: string; run_id: string; started_at: string } | null;
     queued: { pipeline: string; run_id: string; trigger: string }[];
@@ -434,7 +443,8 @@ export const api = {
       body: JSON.stringify({ values })
     }),
 
-  listPipelines: () => request<{ items: PipelineSchedule[]; profile_gate: ProfileGate }>("/api/pipelines"),
+  listPipelines: () =>
+    request<{ items: PipelineSchedule[]; profile_gate: ProfileGate; resume_gate: ResumeGate }>("/api/pipelines"),
   updatePipeline: (pipeline: string, patch: Partial<PipelineSchedule>) =>
     request<{ item: PipelineSchedule }>(`/api/pipelines/${pipeline}`, { method: "PUT", body: JSON.stringify(patch) }),
   runPipeline: (pipeline: string) => request<{ run_id: string }>(`/api/pipelines/${pipeline}/run`, { method: "POST" }),
