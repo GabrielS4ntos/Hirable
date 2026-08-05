@@ -24,6 +24,9 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useToast } from "@/components/ui/toast";
 import { RecordDetailDialog } from "@/components/RecordDetailDialog";
 import { ProfileGateBanner } from "@/components/ProfileGateBanner";
+import { Pagination } from "@/components/ui/pagination";
+
+const PAGE_SIZE = 25;
 
 export function JobsPage({ status }: PageProps) {
   const toast = useToast();
@@ -43,16 +46,23 @@ export function JobsPage({ status }: PageProps) {
   const [debouncedQuery, setDebouncedQuery] = React.useState("");
   const [sending, setSending] = React.useState<Set<string>>(new Set());
   const [detail, setDetail] = React.useState<AgentRecord | null>(null);
+  const [offset, setOffset] = React.useState(0);
 
   React.useEffect(() => {
     const timer = setTimeout(() => setDebouncedQuery(query.trim()), 300);
     return () => clearTimeout(timer);
   }, [query]);
 
+  // A narrower filter can have fewer pages than the one you are standing on.
+  React.useEffect(() => { setOffset(0); }, [kind, sendState, debouncedQuery]);
+
+  // The records table grows for as long as the agent runs, so it is read a page
+  // at a time. Polling is paused past the first page: new records land at the
+  // top, which would push rows across page boundaries while they are being read.
   const records = usePolling(
-    () => api.listRecords({ kind, send_state: sendState, q: debouncedQuery, limit: 300 }),
-    6000,
-    [kind, sendState, debouncedQuery]
+    () => api.listRecords({ kind, send_state: sendState, q: debouncedQuery, limit: PAGE_SIZE, offset }),
+    offset === 0 ? 6000 : 0,
+    [kind, sendState, debouncedQuery, offset]
   );
 
   const items = records.data?.items ?? [];
@@ -276,6 +286,13 @@ export function JobsPage({ status }: PageProps) {
               })}
             </TableBody>
           </Table>
+
+          <Pagination
+            offset={offset}
+            pageSize={PAGE_SIZE}
+            total={records.data?.total ?? 0}
+            onOffsetChange={setOffset}
+          />
         </CardContent>
       </Card>
 

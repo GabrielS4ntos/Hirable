@@ -171,7 +171,7 @@ function resolveJobSendState(job, evaluation, context) {
     return {
       send_method: "external",
       send_state: "unsupported",
-      reason: "Vaga sem Easy Apply: candidatura precisa ser feita no site da empresa.",
+      reason: "Vaga sem Candidatura Simplificada: candidatura precisa ser feita no site da empresa.",
       status: "skipped"
     };
   }

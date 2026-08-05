@@ -34,15 +34,19 @@ function useHashRoute(): [RouteId, (id: RouteId) => void] {
   const [route, setRoute] = React.useState<RouteId>(read);
 
   React.useEffect(() => {
-    const onChange = () => {
-      setRoute(read());
-      // A hash change keeps the previous scroll position, so a short page opened
-      // halfway down after coming from a long one.
-      window.scrollTo({ top: 0 });
-    };
+    const onChange = () => setRoute(read());
     window.addEventListener("hashchange", onChange);
     return () => window.removeEventListener("hashchange", onChange);
   }, []);
+
+  // Every route starts at the top. Doing it on the route value rather than on
+  // the hashchange event covers the paths the event misses — a reload straight
+  // into #/perfil, and a back/forward that the browser would otherwise restore
+  // to wherever the previous visit ended.
+  React.useEffect(() => {
+    if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+    window.scrollTo({ top: 0 });
+  }, [route]);
 
   return [route, (id: RouteId) => { window.location.hash = `/${id}`; }];
 }
@@ -99,7 +103,7 @@ function AppShell() {
   return (
       <TooltipProvider delayDuration={200}>
         <div className="flex min-h-screen flex-col bg-background lg:flex-row">
-          <aside className="flex shrink-0 flex-col gap-6 border-b border-border bg-card/40 px-4 py-5 lg:w-64 lg:border-r lg:border-b-0">
+          <aside className="flex shrink-0 flex-col gap-6 border-b border-border bg-card/40 px-4 py-5 lg:sticky lg:top-0 lg:h-screen lg:w-64 lg:border-r lg:border-b-0">
             <div className="flex items-center justify-between gap-2">
               <BrandLockup markClassName="size-9" subtitle={t("app.localConsole")} />
               <button

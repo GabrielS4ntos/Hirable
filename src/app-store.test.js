@@ -176,7 +176,7 @@ test("runs record their lifecycle and summary", () => {
     assert.ok(store.runningRun("jobs"));
 
     store.finishRun(runId, { status: "success", exit_code: 0, summary: { status: "scanned", job_count: 12 } });
-    const [run] = store.listRuns({ pipeline: "jobs" });
+    const [run] = store.listRuns({ pipeline: "jobs" }).items;
     assert.equal(run.status, "success");
     assert.equal(run.summary.job_count, 12);
     assert.ok(run.duration_ms !== null);
@@ -446,4 +446,68 @@ test("weekday and daily time normalization reject junk input", () => {
   assert.deepEqual(normalizeWeekdays([5, 1, 1, 9, -2]), [1, 5]);
   assert.deepEqual(normalizeWeekdays([]), [0, 1, 2, 3, 4, 5, 6]);
   assert.deepEqual(normalizeDailyTimes("08:00, 25:00, 7:5, 07:05"), ["07:05", "08:00"]);
+});
+
+/* Pagination: both tables grow without bound, so both are read a page at a time. */
+
+test("run history is paged, and reports how much it is not showing", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    for (let i = 0; i < 12; i++) {
+      const id = store.startRun({ pipeline: i % 2 ? "jobs" : "dm", trigger: "auto" });
+      store.finishRun(id, { status: "success", summary: { index: i } });
+    }
+
+    const first = store.listRuns({ limit: 5 });
+    assert.equal(first.items.length, 5);
+    assert.equal(first.total, 12, "o total conta tudo, nao so a pagina");
+
+    const second = store.listRuns({ limit: 5, offset: 5 });
+    assert.equal(second.items.length, 5);
+    assert.equal(second.total, 12);
+    // Pages must not overlap, or the reader sees the same run twice.
+    const overlap = second.items.filter((item) => first.items.some((other) => other.id === item.id));
+    assert.deepEqual(overlap, []);
+
+    const last = store.listRuns({ limit: 5, offset: 10 });
+    assert.equal(last.items.length, 2, "a ultima pagina e parcial");
+    assert.deepEqual(store.listRuns({ limit: 5, offset: 99 }).items, [], "alem do fim nao inventa linhas");
+  } finally {
+    cleanup();
+  }
+});
+
+test("a filtered run history counts only the filtered rows", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    for (let i = 0; i < 7; i++) {
+      const id = store.startRun({ pipeline: i < 3 ? "jobs" : "dm", trigger: "auto" });
+      store.finishRun(id, { status: "success" });
+    }
+    // The total drives the page count, so filtering it wrong shows phantom pages.
+    assert.equal(store.listRuns({ pipeline: "jobs" }).total, 3);
+    assert.equal(store.listRuns({ pipeline: "dm" }).total, 4);
+    assert.equal(store.listRuns({}).total, 7);
+  } finally {
+    cleanup();
+  }
+});
+
+test("records are paged the same way, with the same guarantees", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    for (let i = 0; i < 9; i++) {
+      store.upsertAgentRecord({
+        record_id: `job-${i}`, pipeline: "jobs", kind: "job", external_id: String(i),
+        title: `Vaga ${i}`, url: "https://x", send_method: "easy_apply",
+        send_state: "available", decision: "apply", analyzed_at: new Date(Date.now() - i * 60000).toISOString()
+      });
+    }
+    const page = store.listAgentRecords({ kind: "job", limit: 4, offset: 4 });
+    assert.equal(page.items.length, 4);
+    assert.equal(page.total, 9);
+    assert.deepEqual(store.listAgentRecords({ kind: "job", limit: 4, offset: 8 }).items.length, 1);
+  } finally {
+    cleanup();
+  }
 });

@@ -12,11 +12,22 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/components/ui/toast";
 import { localizedError, pipelineLabel, useI18n } from "@/lib/i18n";
 import { ProfileGateBanner } from "@/components/ProfileGateBanner";
+import { Pagination } from "@/components/ui/pagination";
+
+const RUNS_PAGE_SIZE = 10;
 
 export function DashboardPage({ status, refreshStatus }: PageProps) {
   const toast = useToast();
   const { t, locale } = useI18n();
-  const runs = usePolling(() => api.listRuns(), 5000);
+  // Run history only grows, so it is read a page at a time. Polling pauses on
+  // any page but the first: refreshing under someone reading page 3 would
+  // shuffle rows out from under them.
+  const [runsOffset, setRunsOffset] = React.useState(0);
+  const runs = usePolling(
+    () => api.listRuns({ limit: RUNS_PAGE_SIZE, offset: runsOffset }),
+    runsOffset === 0 ? 5000 : 0,
+    [runsOffset]
+  );
   const [starting, setStarting] = React.useState<string | null>(null);
 
   const jobCounts = status?.counts.job ?? {};
@@ -68,9 +79,9 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
         />
       </div>
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid items-stretch gap-4 lg:grid-cols-3">
         {status?.schedules.map((schedule) => (
-          <Card key={schedule.pipeline}>
+          <Card key={schedule.pipeline} className="flex flex-col">
             <CardHeader className="pb-3">
               <CardTitle className="flex items-center justify-between gap-2 text-sm">
                 {pipelineLabel(schedule.pipeline, schedule.label, locale)}
@@ -82,7 +93,7 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
               </CardTitle>
               <CardDescription className="font-mono text-xs">{schedule.summary}</CardDescription>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="flex flex-1 flex-col gap-3">
               <div className="space-y-1 text-xs text-muted-foreground">
                 <p className="flex items-center gap-1.5">
                   <CalendarClock className="size-3.5" />
@@ -103,7 +114,7 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
               <Button
                 variant="outline"
                 size="sm"
-                className="w-full"
+                className="mt-auto w-full"
                 disabled={starting === schedule.pipeline || schedule.mode === "off" || gateBlocked}
                 onClick={() => runNow(schedule.pipeline)}
               >
@@ -158,6 +169,14 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
               ))}
             </TableBody>
           </Table>
+
+          <Pagination
+            className="mt-3"
+            offset={runsOffset}
+            pageSize={RUNS_PAGE_SIZE}
+            total={runs.data?.total ?? 0}
+            onOffsetChange={setRunsOffset}
+          />
         </CardContent>
       </Card>
     </div>

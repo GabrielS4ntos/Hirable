@@ -1,15 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import {
-  PROFILE_SECTIONS,
-  buildProfileResponseSchema,
-  declaredDemographics,
-  deriveDemographicKeywords,
-  emptyProfile,
-  normalizeProfile,
-  profileCompleteness,
-  profileFactsForModel
-} from "./profile-schema.js";
+import { PROFILE_SECTIONS, buildProfileResponseSchema, canonicalOption, declaredDemographics, deriveDemographicKeywords, emptyProfile, normalizeProfile, profileCompleteness, profileFactsForModel } from "./profile-schema.js";
 
 test("an empty profile has every schema key with a typed default", () => {
   const profile = emptyProfile();
@@ -192,4 +183,53 @@ test("every user-facing label is written in proper Portuguese", () => {
       for (const sub of field.item_fields || []) assert.doesNotMatch(sub.label, wrong, `sub ${sub.key}`);
     }
   }
+});
+
+test("a value that is an option, spelled differently, is snapped to the option", () => {
+  // The extraction agent writes "preta"; the list says "Preta". Treating them as
+  // different opened a free-text box under a field the user had answered, and
+  // handed the eligibility guard a spelling it does not compare against.
+  const profile = normalizeProfile({
+    demographics: { race_ethnicity: "preta", gender: "MULHER", gender_identity: "cisgenero" }
+  });
+  assert.equal(profile.demographics.race_ethnicity, "Preta");
+  assert.equal(profile.demographics.gender, "Mulher");
+  assert.equal(profile.demographics.gender_identity, "Cisgênero");
+});
+
+test("a value that is genuinely outside the list survives untouched", () => {
+  // The whole point of enum_or_text: these categories never cover everyone.
+  const profile = normalizeProfile({ demographics: { gender: "Agênero" } });
+  assert.equal(profile.demographics.gender, "Agênero");
+});
+
+test("canonicalOption ignores accents, case and inflection — and nothing more", () => {
+  const options = ["Branca", "Preta", "Parda", "Não-binário"];
+  assert.equal(canonicalOption("nao-binario", options), "Não-binário");
+  assert.equal(canonicalOption("  parda  ", options), "Parda");
+  // Same answer, masculine inflection.
+  assert.equal(canonicalOption("pardo", options), "Parda");
+  // A different answer stays a different answer.
+  assert.equal(canonicalOption("Prefiro não informar", options), "Prefiro não informar");
+  assert.equal(canonicalOption("", options), "");
+});
+
+test("an English answer is accepted as the option it means", () => {
+  // The extraction agent reads English forms and résumés; "White" and "Branca"
+  // are the same answer, and treating them as different littered the profile
+  // form with free-text boxes under questions the user had already answered.
+  const profile = normalizeProfile({
+    demographics: { gender: "Male", gender_identity: "Cisgender man", race_ethnicity: "White", sexual_orientation: "Heterosexual" }
+  });
+  assert.equal(profile.demographics.gender, "Homem");
+  assert.equal(profile.demographics.gender_identity, "Cisgênero");
+  assert.equal(profile.demographics.race_ethnicity, "Branca");
+  assert.equal(profile.demographics.sexual_orientation, "Heterossexual");
+});
+
+test("an alias never crosses into a list that does not offer it", () => {
+  // "white" maps to "Branca", which is not a gender: the alias must be ignored
+  // when the field's own list has no such option.
+  assert.equal(canonicalOption("White", ["Mulher", "Homem", "Não-binário"]), "White");
+  assert.equal(canonicalOption("Male", ["Branca", "Preta"]), "Male");
 });

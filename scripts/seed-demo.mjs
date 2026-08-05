@@ -89,10 +89,14 @@ store.saveUserProfile({
     },
     years_by_technology: { "Node.js": 8, TypeScript: 6, Go: 3, Postgres: 7, Kubernetes: 4 },
     recent_experiences: [
-      { company: "Fintech Aurora", role: "Engenheiro Backend Sênior", start: "2022-03", end: "atual",
-        summary: "Plataforma de pagamentos: APIs em Go, filas Kafka, 4M de transações/dia." },
-      { company: "Loja Nimbus", role: "Engenheiro Backend Pleno", start: "2019-01", end: "2022-02",
-        summary: "Catálogo e checkout em Node.js, migração para Kubernetes." }
+      {
+        company: "Fintech Aurora", role: "Engenheiro Backend Sênior", start: "2022-03", end: "atual",
+        summary: "Plataforma de pagamentos: APIs em Go, filas Kafka, 4M de transações/dia."
+      },
+      {
+        company: "Loja Nimbus", role: "Engenheiro Backend Pleno", start: "2019-01", end: "2022-02",
+        summary: "Catálogo e checkout em Node.js, migração para Kubernetes."
+      }
     ],
     education: [
       { institution: "Universidade de São Paulo", degree: "Bacharelado em Ciência da Computação", year: "2018" }
@@ -157,37 +161,53 @@ for (const [index, resume] of resumes.entries()) {
 /* ------------------------------------------------------------- agent_records: vagas */
 
 const jobs = [
-  { external_id: "3901", title: "Senior Backend Engineer", company: "Nimbus Health", location: "Remoto · Brasil",
+  {
+    external_id: "3901", title: "Senior Backend Engineer", company: "Nimbus Health", location: "Remoto · Brasil",
     easy_apply: true, score: 92, decision: "apply", send_state: "sent_auto", sentBy: "auto", minutes: 42,
     resume_type: "backend", confidence: 88,
-    reason: "Stack casa com Node.js e Postgres; vaga remota para o Brasil e senioridade compatível." },
-  { external_id: "3902", title: "Staff Engineer, Payments", company: "Aurora Pay", location: "Remoto · LATAM",
+    reason: "Stack casa com Node.js e Postgres; vaga remota para o Brasil e senioridade compatível."
+  },
+  {
+    external_id: "3902", title: "Staff Engineer, Payments", company: "Aurora Pay", location: "Remoto · LATAM",
     easy_apply: true, score: 89, decision: "apply", send_state: "available", minutes: 96,
     resume_type: "backend", confidence: 84,
-    reason: "Experiência direta em pagamentos e alta escala; exige Go, que o currículo cobre." },
-  { external_id: "3903", title: "Platform Engineer (Kubernetes)", company: "Vega Cloud", location: "Remoto · Global",
+    reason: "Experiência direta em pagamentos e alta escala; exige Go, que o currículo cobre."
+  },
+  {
+    external_id: "3903", title: "Platform Engineer (Kubernetes)", company: "Vega Cloud", location: "Remoto · Global",
     easy_apply: true, score: 85, decision: "apply", send_state: "sent_manual", sentBy: "manual", minutes: 210,
     resume_type: "plataforma", confidence: 79,
-    reason: "Kubernetes e Terraform aparecem no currículo de plataforma; time distribuído." },
-  { external_id: "3904", title: "Backend Engineer, Data Platform", company: "Corvo Analytics", location: "Híbrido · São Paulo",
+    reason: "Kubernetes e Terraform aparecem no currículo de plataforma; time distribuído."
+  },
+  {
+    external_id: "3904", title: "Backend Engineer, Data Platform", company: "Corvo Analytics", location: "Híbrido · São Paulo",
     easy_apply: false, score: 74, decision: "apply", send_state: "unsupported", minutes: 260,
     resume_type: "backend", confidence: 66,
-    reason: "Boa aderência técnica, mas a candidatura acontece no site da empresa." },
-  { external_id: "3905", title: "Engenheiro de Software Sênior (PCD)", company: "Banco Meridiano", location: "Remoto · Brasil",
+    reason: "Boa aderência técnica, mas a candidatura acontece no site da empresa."
+  },
+  {
+    external_id: "3905", title: "Engenheiro de Software Sênior (PCD)", company: "Banco Meridiano", location: "Remoto · Brasil",
     easy_apply: true, score: 81, decision: "reject", send_state: "blocked", minutes: 300,
     reason: "Vaga exclusiva para pessoas com deficiência e o perfil não declara PCD.",
-    risk_flags: ["vaga_exclusiva_pcd"] },
-  { external_id: "3906", title: "Engineering Manager", company: "Orion Labs", location: "Remoto · Brasil",
+    risk_flags: ["vaga_exclusiva_pcd"]
+  },
+  {
+    external_id: "3906", title: "Engineering Manager", company: "Orion Labs", location: "Remoto · Brasil",
     easy_apply: true, score: 58, decision: "reject", send_state: "available", minutes: 340,
-    reason: "Posição de gestão; o perfil busca trilha técnica individual." },
-  { external_id: "3907", title: "Node.js Developer", company: "Helix Commerce", location: "Remoto · Brasil",
+    reason: "Posição de gestão; o perfil busca trilha técnica individual."
+  },
+  {
+    external_id: "3907", title: "Node.js Developer", company: "Helix Commerce", location: "Remoto · Brasil",
     easy_apply: true, score: 77, decision: "apply", send_state: "failed", minutes: 380,
     resume_type: "backend", confidence: 71,
-    reason: "Aderente ao perfil, mas o formulário pediu um campo que o agente não pode responder." },
-  { external_id: "3908", title: "Golang Engineer", company: "Petra Logistics", location: "Remoto · LATAM",
+    reason: "Aderente ao perfil, mas o formulário pediu um campo que o agente não pode responder."
+  },
+  {
+    external_id: "3908", title: "Golang Engineer", company: "Petra Logistics", location: "Remoto · LATAM",
     easy_apply: true, score: 83, decision: "apply", send_state: "available", minutes: 410,
     resume_type: "backend", confidence: 76,
-    reason: "Go em produção há 3 anos; produto de logística com times remotos." }
+    reason: "Go em produção há 3 anos; produto de logística com times remotos."
+  }
 ];
 
 for (const job of jobs) {
@@ -216,28 +236,38 @@ for (const job of jobs) {
   record.send_state = job.send_state;
   if (job.send_state === "blocked") record.send_blocked_reason = "vaga exclusiva para um grupo que o perfil não declara";
   if (job.send_state === "failed") record.send_error = "campo obrigatório sem resposta confiável";
-  if (job.send_state === "unsupported") record.send_blocked_reason = "sem Easy Apply: candidatura no site da empresa";
+  if (job.send_state === "unsupported") record.send_blocked_reason = "sem Candidatura Simplificada: candidatura no site da empresa";
   store.upsertAgentRecord(record);
 }
 
 /* ------------------------------------------------------------- agent_records: DMs e convites */
 
 const dms = [
-  { participant: "Marina Alves", headline: "Tech Recruiter · Nimbus Health", intent: "interview_scheduling",
-    reason: "Recrutadora propôs conversa inicial; agenda sugerida para quinta às 15h.", state: "sent_auto", minutes: 65, confidence: 82 },
-  { participant: "Rafael Duarte", headline: "Head of Engineering · Aurora Pay", intent: "role_details",
-    reason: "Pediu detalhes de senioridade e pretensão; resposta preparada para revisão.", state: "available", minutes: 120, confidence: 74 },
-  { participant: "Consultoria Talent+", headline: "Vaga presencial em Campinas", intent: "decline",
-    reason: "Vaga presencial fora da preferência remota declarada no perfil.", state: "available", minutes: 190, confidence: 68 }
+  {
+    participant: "Marina Alves", headline: "Tech Recruiter · Nimbus Health", intent: "interview_scheduling",
+    reason: "Recrutadora propôs conversa inicial; agenda sugerida para quinta às 15h.", state: "sent_auto", minutes: 65, confidence: 82
+  },
+  {
+    participant: "Rafael Duarte", headline: "Head of Engineering · Aurora Pay", intent: "role_details",
+    reason: "Pediu detalhes de senioridade e pretensão; resposta preparada para revisão.", state: "available", minutes: 120, confidence: 74
+  },
+  {
+    participant: "Consultoria Talent+", headline: "Vaga presencial em Campinas", intent: "decline",
+    reason: "Vaga presencial fora da preferência remota declarada no perfil.", state: "available", minutes: 190, confidence: 68
+  }
 ];
 for (const dm of dms) {
   const record = normalizeDmRecord(
-    { thread_id: `t-${dm.participant}`, participant: dm.participant, headline: dm.headline,
-      url: "https://www.linkedin.com/messaging/", time_label: "hoje" },
+    {
+      thread_id: `t-${dm.participant}`, participant: dm.participant, headline: dm.headline,
+      url: "https://www.linkedin.com/messaging/", time_label: "hoje"
+    },
     { intent: dm.intent, confidence: dm.confidence, reason: dm.reason, risk_flags: [] },
-    { decision: dm.state.startsWith("sent") ? "apply" : "pending", sendState: dm.state,
+    {
+      decision: dm.state.startsWith("sent") ? "apply" : "pending", sendState: dm.state,
       sentBy: dm.state === "sent_auto" ? "auto" : null,
-      sentAt: dm.state.startsWith("sent") ? minutesAgo(dm.minutes) : null, analyzedAt: minutesAgo(dm.minutes + 3) }
+      sentAt: dm.state.startsWith("sent") ? minutesAgo(dm.minutes) : null, analyzedAt: minutesAgo(dm.minutes + 3)
+    }
   );
   record.send_state = dm.state;
   store.upsertAgentRecord(record);
@@ -251,10 +281,12 @@ const invites = [
 for (const invite of invites) {
   const record = normalizeInviteRecord(
     { name: invite.name, headline: invite.headline, url: "https://www.linkedin.com/mynetwork/grow/" },
-    { accepted: invite.accepted, decision: invite.accepted ? "accept" : "reject",
+    {
+      accepted: invite.accepted, decision: invite.accepted ? "accept" : "reject",
       sendState: invite.accepted ? "sent_auto" : "blocked",
       reason: invite.accepted ? "Perfil compatível com a área de atuação." : "Conta promocional sem relação com a área.",
-      sentAt: invite.accepted ? minutesAgo(invite.minutes) : null, analyzedAt: minutesAgo(invite.minutes + 2) }
+      sentAt: invite.accepted ? minutesAgo(invite.minutes) : null, analyzedAt: minutesAgo(invite.minutes + 2)
+    }
   );
   record.send_state = invite.accepted ? "sent_auto" : "blocked";
   if (!invite.accepted) record.send_blocked_reason = "convite recusado pela política do agente";

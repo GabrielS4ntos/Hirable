@@ -8,7 +8,7 @@ import path from "node:path";
 let DatabaseSync = null;
 try {
   ({ DatabaseSync } = await import("node:sqlite"));
-} catch {}
+} catch { }
 
 export const PIPELINES = [
   {
@@ -25,7 +25,7 @@ export const PIPELINES = [
   },
   {
     pipeline: "jobs",
-    label: "Vagas (scan + Easy Apply)",
+    label: "Vagas (scan + Candidatura Simplificada)",
     command: "jobs:scan",
     description: "Busca vagas, avalia com o modelo e aplica quando permitido."
   }
@@ -271,7 +271,7 @@ export class AppStore {
     `);
     this.#migrateApiKeyProviders();
     this.#migrateNotificationColumns();
-    try { fs.chmodSync(databasePath, 0o600); } catch {}
+    try { fs.chmodSync(databasePath, 0o600); } catch { }
     this.ensureDefaultSchedules();
   }
 
@@ -850,12 +850,22 @@ export class AppStore {
     `);
   }
 
-  listRuns({ pipeline = null, limit = 50 } = {}) {
+  /**
+   * A page of run history, newest first.
+   *
+   * Returns the total alongside the page: the table grows for as long as the
+   * scheduler runs, so the interface needs to know how much it is not showing.
+   */
+  listRuns({ pipeline = null, limit = 50, offset = 0 } = {}) {
     const safeLimit = Math.max(1, Math.min(200, Number(limit) || 50));
-    const rows = pipeline
-      ? this.db.prepare("SELECT * FROM pipeline_runs WHERE pipeline = ? ORDER BY started_at DESC LIMIT ?").all(String(pipeline), safeLimit)
-      : this.db.prepare("SELECT * FROM pipeline_runs ORDER BY started_at DESC LIMIT ?").all(safeLimit);
-    return rows.map((row) => ({
+    const safeOffset = Math.max(0, Number(offset) || 0);
+    const where = pipeline ? "WHERE pipeline = ?" : "";
+    const params = pipeline ? [String(pipeline)] : [];
+    const rows = this.db
+      .prepare(`SELECT * FROM pipeline_runs ${where} ORDER BY started_at DESC LIMIT ? OFFSET ?`)
+      .all(...params, safeLimit, safeOffset);
+    const total = this.db.prepare(`SELECT COUNT(*) AS total FROM pipeline_runs ${where}`).get(...params);
+    const items = rows.map((row) => ({
       id: row.id,
       pipeline: row.pipeline,
       trigger: row.trigger,
@@ -867,6 +877,7 @@ export class AppStore {
       summary: row.summary_json ? safeParse(row.summary_json) : null,
       error: row.error
     }));
+    return { items, total: Number(total?.total || 0) };
   }
 
   runningRun(pipeline) {
@@ -1390,19 +1401,19 @@ export class AppStore {
     const row = this.db.prepare("SELECT * FROM user_profile WHERE id = 1").get();
     this.#profileCache = row
       ? {
-          resume_text: row.resume_text || "",
-          profile: safeParse(row.profile_json) || {},
-          onboarding_completed_at: row.onboarding_completed_at,
-          onboarding_complete: Boolean(row.onboarding_completed_at),
-          updated_at: row.updated_at
-        }
+        resume_text: row.resume_text || "",
+        profile: safeParse(row.profile_json) || {},
+        onboarding_completed_at: row.onboarding_completed_at,
+        onboarding_complete: Boolean(row.onboarding_completed_at),
+        updated_at: row.updated_at
+      }
       : {
-          resume_text: "",
-          profile: {},
-          onboarding_completed_at: null,
-          onboarding_complete: false,
-          updated_at: null
-        };
+        resume_text: "",
+        profile: {},
+        onboarding_completed_at: null,
+        onboarding_complete: false,
+        updated_at: null
+      };
     return this.#profileCache;
   }
 

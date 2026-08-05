@@ -507,8 +507,13 @@ export const api = {
   },
   sendRecord: (id: string) => request<{ run_id: string; item: AgentRecord }>(`/api/records/${id}/send`, { method: "POST" }),
 
-  listRuns: (pipeline?: string) =>
-    request<{ items: PipelineRun[] }>(`/api/runs${pipeline ? `?pipeline=${pipeline}` : ""}`),
+  listRuns: (params: { pipeline?: string; limit?: number; offset?: number } = {}) => {
+    const query = new URLSearchParams();
+    for (const [key, value] of Object.entries(params)) {
+      if (value !== undefined && value !== "") query.set(key, String(value));
+    }
+    return request<{ items: PipelineRun[]; total: number }>(`/api/runs?${query}`);
+  },
 
   getSettings: () => request<{ settings: Record<string, unknown>; config: Record<string, any> }>("/api/settings"),
   saveSettings: (patch: Record<string, unknown>) =>

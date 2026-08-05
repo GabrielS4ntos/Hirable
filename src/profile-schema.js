@@ -17,7 +17,7 @@ export const PROFILE_SECTIONS = [
   {
     key: "identity",
     label: "Identidade e contato",
-    description: "Usado para preencher os campos fixos do formulário Easy Apply.",
+    description: "Usado para preencher os campos fixos do formulário Candidatura Simplificada.",
     fields: [
       { key: "full_name", label: "Nome completo", type: "text", required: true, hint: "Como aparece no currículo." },
       { key: "name_aliases", label: "Outros nomes usados", type: "string_list", hint: "Nome de exibição no LinkedIn, apelido profissional." },
@@ -107,7 +107,7 @@ export const PROFILE_SECTIONS = [
   {
     key: "skills",
     label: "Anos por tecnologia",
-    description: "Responde diretamente às perguntas 'quantos anos de experiência com X' do Easy Apply.",
+    description: "Responde diretamente às perguntas 'quantos anos de experiência com X' da Candidatura Simplificada.",
     fields: [
       { key: "years_by_technology", label: "Anos por tecnologia", type: "years_map", hint: "Ex: TypeScript = 5." }
     ]
@@ -231,8 +231,14 @@ function coerce(field, value) {
 
     // A curated list plus free text: these categories never cover everyone, so a
     // value outside the list is kept instead of silently discarded.
+    //
+    // A value that *is* one of the options, written with different casing or
+    // accents — "preta" from the extraction agent against "Preta" in the list —
+    // is snapped to the canonical spelling. Otherwise the interface reads it as
+    // free text and opens an "Other…" box under a field the user did answer,
+    // and the eligibility guard compares against a spelling it does not expect.
     case "enum_or_text":
-      return cleanText(value, 120);
+      return canonicalOption(cleanText(value, 120), field.options);
     default:
       return cleanText(value, field.key === "disability_details" ? 300 : 400);
   }
@@ -374,6 +380,60 @@ function objectSchema(properties) {
     propertyOrdering: Object.keys(properties),
     additionalProperties: false
   };
+}
+
+/** Accent- and case-insensitive key, for matching a value against an option list. */
+export function optionKey(value) {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+/**
+ * English answers for the same categories.
+ *
+ * The extraction agent reads résumés and LinkedIn forms that are often in
+ * English, so it writes "White" where the list says "Branca". Those are the
+ * same answer, and treating them as different both litters the form with
+ * free-text boxes and hands the eligibility guard a spelling it never compares
+ * against. Only exact, unambiguous equivalents are listed — anything else stays
+ * free text, which is what that field type is for.
+ */
+const OPTION_ALIASES = {
+  male: "Homem", man: "Homem", masculine: "Homem",
+  female: "Mulher", woman: "Mulher", feminine: "Mulher",
+  nonbinary: "Não-binário", "non-binary": "Não-binário", enby: "Não-binário",
+  cisgender: "Cisgênero", cis: "Cisgênero", "cisgender man": "Cisgênero", "cisgender woman": "Cisgênero",
+  transgender: "Transgênero", trans: "Transgênero", "transgender man": "Transgênero", "transgender woman": "Transgênero",
+  white: "Branca", black: "Preta", brown: "Parda", mixed: "Parda", pardo: "Parda",
+  asian: "Amarela", indigenous: "Indígena", "native american": "Indígena",
+  heterosexual: "Heterossexual", straight: "Heterossexual",
+  homosexual: "Homossexual", gay: "Homossexual", lesbian: "Homossexual",
+  bisexual: "Bissexual", asexual: "Assexual",
+  physical: "Física", hearing: "Auditiva", auditory: "Auditiva",
+  visual: "Visual", intellectual: "Intelectual", multiple: "Múltipla"
+};
+
+/**
+ * The option a value means, spelled the way the list spells it — or the value
+ * untouched when it genuinely is not one of them.
+ */
+export function canonicalOption(value, options = []) {
+  if (!value) return value;
+  const key = optionKey(value);
+  const list = options || [];
+
+  const direct = list.find((option) => optionKey(option) === key);
+  if (direct) return direct;
+
+  // An alias only counts when the list it maps to actually offers that option:
+  // "white" must not turn a gender field into "Branca".
+  const aliased = OPTION_ALIASES[key];
+  if (aliased && list.includes(aliased)) return aliased;
+
+  return value;
 }
 
 /** Fields the onboarding needs before the agents can be trusted to act. */

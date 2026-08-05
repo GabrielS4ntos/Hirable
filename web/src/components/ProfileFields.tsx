@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { profileMetadata, useI18n } from "@/lib/i18n";
+import { optionKey } from "@/lib/option-key";
 
 type Profile = Record<string, any>;
 
@@ -206,14 +207,21 @@ function EnumOrTextControl({
 }) {
   const { t, locale } = useI18n();
   const options = field.options || [];
-  const isOther = Boolean(value) && !options.includes(value);
+  // Matched the way the server canonicalises it: a value that is one of the
+  // options with different casing or accents is that option, not free text.
+  const matched = options.find((option) => optionKey(option) === optionKey(value));
+  const isOther = Boolean(value) && !matched;
   const [showText, setShowText] = React.useState(isOther);
+  // Focus belongs to the person who just picked "Other…", never to a saved
+  // value: autoFocus on mount scrolls the browser to this field, which landed
+  // people in the middle of the profile form every time they opened it.
+  const [focusText, setFocusText] = React.useState(false);
 
   React.useEffect(() => {
     if (isOther) setShowText(true);
   }, [isOther]);
 
-  const selected = showText ? "__other__" : value || "__empty__";
+  const selected = showText ? "__other__" : matched || "__empty__";
 
   return (
     <div className="space-y-2">
@@ -222,9 +230,11 @@ function EnumOrTextControl({
         onValueChange={(next) => {
           if (next === "__other__") {
             setShowText(true);
+            setFocusText(true);
             return;
           }
           setShowText(false);
+          setFocusText(false);
           onChange(next === "__empty__" ? "" : next);
         }}
       >
@@ -247,7 +257,7 @@ function EnumOrTextControl({
           value={isOther ? value : ""}
           onChange={(event) => onChange(event.target.value)}
           placeholder={locale === "en" ? "Describe" : "Descreva"}
-          autoFocus
+          autoFocus={focusText}
         />
       ) : null}
     </div>

@@ -669,7 +669,11 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
   /* ------------------------------------------------------------------ runs */
 
   route("GET", /^\/api\/runs$/, (req, res, params, url) => ({
-    items: store.listRuns({ pipeline: url.searchParams.get("pipeline"), limit: url.searchParams.get("limit") || 50 })
+    ...store.listRuns({
+      pipeline: url.searchParams.get("pipeline"),
+      limit: url.searchParams.get("limit") || 50,
+      offset: url.searchParams.get("offset") || 0
+    })
   }));
 
   /* --------------------------------------------------------- configuration */
