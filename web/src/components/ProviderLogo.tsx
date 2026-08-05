@@ -36,6 +36,41 @@ export function ProviderLogo({ provider, className = "size-6" }: { provider: str
         </svg>
       );
 
+    // Coding-agent CLIs. Marks are drawn, not fetched, for the same reason as
+    // the model providers: no request leaves the machine to render a settings page.
+    case "claude":
+      return (
+        <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+          <path d="M4.7 15.9 9 13.5l.1-.2-.1-.2H8.8l-.7-.1H5.9l-2-.1-1.6-.1-.5-.1-.5-.6.1-.4.4-.3.6.1 1.3.1 2 .1 1.4.1 2.1.2h.3v-.1l-.1-.1-.2-.1-1.5-1-1.6-1.1-.9-.6-.4-.3-.3-.3-.1-.7.5-.5.6.1.2.1.6.5 1.4 1.1 1.8 1.3.3.2.1-.1v-.1L9 8.8 7.7 6.4l-.6-1-.2-.6a2 2 0 0 1-.1-.5l.6-.7.3-.1.7.1.3.3.5 1 .7 1.6L11 8.4l.3.7.2.2h.1v-.2l.1-1.2.2-1.5.2-2 .1-.5.3-.6.6-.2.4.3.3.5v.4l-.2.9-.3 1.9-.3 1.2h.1l.3-.3 1-1.4 1.7-2.1.4-.4.4-.3h.7l.5.8-.2.8-.8 1-.7.8-.9 1.3-.6 1 .1.1h.2l2.3-.5 1.3-.2 1.5-.3.7.3.1.6-.5.7-1.6.4-1.9.4-2.8.6h-.1l.1.1.6.1h2.7l2.3.2.6.4.4.5-.1.4-.9.5-1.2-.3-2.8-.7-1-.2h-.1v.1l.8.8 1.5 1.4 1.9 1.7v.9l-.5.1-.9-.2-1.9-1.4-.7-.7-1.7-1.4h-.1v.2l.4.5 2 3 .1.9-.1.3-.5.2-.6-.1-1.1-1.6-1.2-1.8-1-1.6-.1.1-.6 6-.3.3-.6.3-.6-.4-.3-.7.3-1.3.3-1.7.3-1.4.2-1.7.2-.6v-.1h-.1L9.5 17l-1.8 2.5-1.5 1.5-.3.2-.6-.3v-.6l.4-.5 2-2.5 1.1-1.5.8-.9-.1-.1-4.6 3-.8.1-.4-.3.1-.6.2-.2 1.7-1.2Z" />
+        </svg>
+      );
+
+    case "codex":
+      return (
+        <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
+          <rect x="2.5" y="4" width="19" height="16" rx="3" />
+          <path d="M7.5 10 10 12.5 7.5 15" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M12.5 15.2h4" strokeLinecap="round" />
+        </svg>
+      );
+
+    case "opencode":
+      return (
+        <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
+          <path d="M8.5 6 3 12l5.5 6" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M15.5 6 21 12l-5.5 6" strokeLinecap="round" strokeLinejoin="round" />
+          <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none" />
+        </svg>
+      );
+
+    case "agy":
+      return (
+        <svg viewBox="0 0 24 24" className={className} fill="none" stroke="currentColor" strokeWidth="1.9" aria-hidden="true">
+          <path d="m5 18 5.2-12.2a2 2 0 0 1 3.6 0L19 18" strokeLinecap="round" strokeLinejoin="round" />
+          <path d="M8 13.5h8" strokeLinecap="round" />
+        </svg>
+      );
+
     default:
       return null;
   }

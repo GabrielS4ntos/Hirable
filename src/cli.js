@@ -26,6 +26,10 @@ import { extractDocumentText } from "./document-text.js";
 import { pickResumeForJob, resumeCandidatesForModel } from "./resume-matcher.js";
 import { bootstrapDatabasePath, resolveConfig } from "./config.js";
 import { canStartDuringPause } from "./pause.js";
+import { PROFILE_GATE_CODE, profileGateState } from "./profile-gate.js";
+import { DEFAULT_DEDUPE_MINUTES } from "./alert-dedupe.js";
+import { renderAlertEmail } from "./email-template.js";
+import { runAutoFix } from "./auto-fix.js";
 import {
   PROFILE_SECTIONS,
   buildProfileResponseSchema,
@@ -203,6 +207,29 @@ function nowIso() {
   return new Date().toISOString();
 }
 
+/**
+ * Refuses to run a pipeline whose profile is not filled in.
+ *
+ * The scheduler and the API already block this, but the CLI can be invoked
+ * directly (cron, terminal, Docker), and the agents must never act on a profile
+ * they cannot trust.
+ */
+async function skipIfProfileIncomplete(pipeline, config) {
+  const gate = profileGateState(openAppStore(config), config);
+  if (gate.ready) return null;
+  const result = {
+    run_at: nowIso(),
+    pipeline,
+    status: "skipped",
+    code: PROFILE_GATE_CODE,
+    missing_fields: gate.missing,
+    message: gate.reason
+  };
+  await appendRunLog(result);
+  console.log(JSON.stringify(result, null, 2));
+  return result;
+}
+
 async function skipIfPaused(pipeline, config) {
   const trigger = process.env.AGENT_TRIGGER || "manual";
   const decision = canStartDuringPause(config, trigger);
@@ -248,59 +275,67 @@ async function appendAlertLog(entry) {
   await fs.appendFile(path.join(LOG_DIR, "alerts.jsonl"), `${JSON.stringify({ ...entry, logged_at: nowIso() })}\n`);
 }
 
-async function notifyError(error, context = {}) {
-  const config = loadConfig();
-  const message = error?.stack || error?.message || String(error);
-  const alert = {
-    level: "error",
-    command: context.command || process.argv[2] || "unknown",
-    status: "failed",
-    message: message.slice(0, 4000)
-  };
+/**
+ * Single path for every alert.
+ *
+ * The log always records the occurrence; the mailbox does not. Identical
+ * failures inside the dedupe window are counted and stay silent, and the count
+ * rides along on the next email that does go out — so nothing is lost, it is
+ * just not repeated.
+ */
+async function dispatchAlert(alert, config = loadConfig()) {
   await appendAlertLog(alert).catch(() => {});
 
   const delivery = emailDelivery(config);
-  if (delivery.settings?.alert_on_error !== false && delivery.settings?.macos_notification !== false) {
-    const title = config.alerts?.title || "LinkedIn automation error";
-    const body = `${alert.command}: ${message.slice(0, 180).replace(/\s+/g, " ")}`;
-    await execFileAsync("/usr/bin/osascript", [
-      "-e",
-      `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}`
-    ]).catch(() => {});
-  }
-  if (delivery.enabled && delivery.settings?.alert_on_error) {
-    await sendGmail({
-      to: delivery.settings.email_to,
-      subject: `[LinkedIn automation] failed: ${alert.command}`,
-      text: `${alert.command}: ${alert.message}`
-    }).catch(() => {});
-  }
-}
+  const settings = delivery.settings || {};
+  const windowMinutes = Number(settings.alert_dedupe_minutes ?? DEFAULT_DEDUPE_MINUTES);
 
-async function notifyOperationalAlert(message, context = {}) {
-  const config = loadConfig();
-  const alert = {
-    level: context.level || "warning",
-    command: context.command || process.argv[2] || "unknown",
-    status: context.status || "attention_required",
-    message: String(message).slice(0, 4000)
-  };
-  await appendAlertLog(alert).catch(() => {});
-  const delivery = emailDelivery(config);
-  if (delivery.settings?.macos_notification !== false) {
+  let record = { fingerprint: "", notify: true, suppressed: 0, occurrences: 1, first_seen_at: alert.occurred_at };
+  try {
+    record = { ...record, ...openAppStore(config).recordAlert(alert, { windowMinutes }) };
+  } catch {
+    // Without the database we cannot deduplicate; delivering is the safer default.
+  }
+
+  if (settings.macos_notification !== false && record.notify) {
     const title = config.alerts?.title || "LinkedIn automation alert";
-    const body = `${alert.command}: ${alert.message.slice(0, 180).replace(/\s+/g, " ")}`;
+    const body = `${alert.command}: ${String(alert.message).slice(0, 180).replace(/\s+/g, " ")}`;
     await execFileAsync("/usr/bin/osascript", [
       "-e",
       `display notification ${JSON.stringify(body)} with title ${JSON.stringify(title)}`
     ]).catch(() => {});
   }
-  if (delivery.enabled && delivery.settings?.alert_on_error) {
+
+  // The auto-fix runs before the email so its outcome can be reported in it.
+  let autoFix = null;
+  if (record.notify && settings.auto_fix_enabled && alert.level === "error") {
+    autoFix = await attemptAutoFix({ ...alert, ...record }, config);
+  }
+
+  if (!record.notify) return { delivered: false, reason: "deduplicado", ...record };
+
+  if (delivery.enabled && settings.alert_on_error) {
+    const rendered = renderAlertEmail({
+      title: config.alerts?.title || "LinkedIn Local Agent",
+      level: alert.level,
+      command: alert.command,
+      status: alert.status,
+      message: alert.message,
+      occurredAt: alert.occurred_at,
+      firstSeenAt: record.first_seen_at,
+      occurrences: record.occurrences,
+      suppressed: record.suppressed,
+      windowMinutes,
+      autoFix,
+      consoleUrl: `http://127.0.0.1:${process.env.WEB_PORT || 4321}`
+    });
     await sendGmail({
-      to: delivery.settings.email_to,
-      subject: `[LinkedIn automation] ${alert.status}`,
-      text: `${alert.command}: ${alert.message}`
+      to: settings.email_to,
+      subject: rendered.subject,
+      text: rendered.text,
+      html: rendered.html
     }).catch(async (error) => {
+      // Never recurse: a failing mailer must not alert through the mailer.
       await appendAlertLog({
         level: "error",
         command: "gmail.send",
@@ -309,6 +344,66 @@ async function notifyOperationalAlert(message, context = {}) {
       }).catch(() => {});
     });
   }
+  return { delivered: true, ...record };
+}
+
+/** Runs the configured coding-agent CLI against a failure. Never throws. */
+async function attemptAutoFix(alert, config) {
+  try {
+    const store = openAppStore(config);
+    const chain = store.cliAgentChain();
+    if (!chain.length) return { agent: "-", status: "sem agente configurado", detail: "" };
+
+    const result = await runAutoFix(alert, { chain });
+    for (const attempt of result.attempts || []) {
+      store.recordCliAgentRun(attempt.agent, { status: attempt.status, error: attempt.error });
+    }
+    if (alert.fingerprint) {
+      store.markAlertAutoFix(alert.fingerprint, { status: result.status, agent: result.agent || "" });
+    }
+    await appendAlertLog({
+      level: result.status.startsWith("success") ? "info" : "warning",
+      command: "autofix",
+      status: result.status,
+      message: `${(result.attempts || []).map((item) => `${item.agent}:${item.status}`).join(", ")} ${result.summary || result.error || ""}`.slice(0, 4000)
+    }).catch(() => {});
+
+    return {
+      agent: result.agent || (result.attempts || []).map((item) => item.agent).join(" → ") || "-",
+      status: AUTO_FIX_LABELS[result.status] || result.status,
+      detail: result.summary || result.error || ""
+    };
+  } catch (error) {
+    return { agent: "-", status: "falhou", detail: String(error?.message || error).slice(0, 300) };
+  }
+}
+
+const AUTO_FIX_LABELS = {
+  success: "correção aplicada e serviço reiniciado pelo agente",
+  success_git_changed: "correção aplicada, mas o histórico do git mudou — revise as alterações",
+  failed: "não foi possível corrigir automaticamente",
+  no_agent: "nenhum agente de CLI configurado"
+};
+
+async function notifyError(error, context = {}) {
+  const message = error?.stack || error?.message || String(error);
+  return dispatchAlert({
+    level: "error",
+    command: context.command || process.argv[2] || "unknown",
+    status: context.status || "failed",
+    message: message.slice(0, 4000),
+    occurred_at: nowIso()
+  });
+}
+
+async function notifyOperationalAlert(message, context = {}) {
+  return dispatchAlert({
+    level: context.level || "warning",
+    command: context.command || process.argv[2] || "unknown",
+    status: context.status || "attention_required",
+    message: String(message).slice(0, 4000),
+    occurred_at: nowIso()
+  });
 }
 
 export function googleRedirectUri(config) {
@@ -391,19 +486,36 @@ async function loadAuthorizedCalendarClient(config) {
  *
  * @param {{attachments?: {filename: string, mimeType: string, content: Buffer}[]}} message
  */
-function encodeMessage({ to, from, subject, text, attachments = [] }) {
+function encodeMessage({ to, from, subject, text, html = "", attachments = [] }) {
   const headers = [`To: ${to}`, `From: ${from}`, `Subject: ${subject}`, "MIME-Version: 1.0"];
+
+  // A client that cannot render HTML falls back to the text part, so both are
+  // always built from the same data instead of one being a stub.
+  const bodyBoundary = `alt${crypto.randomBytes(12).toString("hex")}`;
+  const bodyLines = html
+    ? [
+        `Content-Type: multipart/alternative; boundary="${bodyBoundary}"`,
+        "",
+        `--${bodyBoundary}`,
+        "Content-Type: text/plain; charset=utf-8",
+        "",
+        text,
+        `--${bodyBoundary}`,
+        "Content-Type: text/html; charset=utf-8",
+        "",
+        html,
+        `--${bodyBoundary}--`
+      ]
+    : ["Content-Type: text/plain; charset=utf-8", "", text];
 
   let raw;
   if (!attachments.length) {
-    raw = [...headers, "Content-Type: text/plain; charset=utf-8", "", text].join("\r\n");
+    raw = [...headers, ...bodyLines].join("\r\n");
   } else {
     const boundary = `b${crypto.randomBytes(16).toString("hex")}`;
     const parts = [
       `--${boundary}`,
-      "Content-Type: text/plain; charset=utf-8",
-      "",
-      text
+      ...bodyLines
     ];
     for (const attachment of attachments) {
       parts.push(
@@ -433,7 +545,7 @@ function encodeMessage({ to, from, subject, text, attachments = [] }) {
  * so a pipeline is never interrupted just because the user has not configured
  * (or has deliberately turned off) email notifications.
  */
-async function sendGmail({ to, subject, text, attachments = [], force = false }) {
+async function sendGmail({ to, subject, text, html = "", attachments = [], force = false }) {
   const config = loadConfig();
   const delivery = emailDelivery(config);
   if (!force && !delivery.enabled) {
@@ -446,7 +558,7 @@ async function sendGmail({ to, subject, text, attachments = [], force = false })
 
   const gmail = await loadAuthorizedGmailClient(config);
   const from = delivery.settings?.email_from || delivery.oauth?.account_email || config.gmail.from;
-  const raw = encodeMessage({ to: recipient, from, subject, text, attachments });
+  const raw = encodeMessage({ to: recipient, from, subject, text, html, attachments });
   const response = await gmail.users.messages.send({
     userId: "me",
     requestBody: { raw }
@@ -1914,6 +2026,8 @@ function nextState(previousState, currentThreads, result) {
 
 async function runDmCheckUnlocked() {
   const config = loadConfig();
+  const blocked = await skipIfProfileIncomplete("dm", config);
+  if (blocked) return blocked;
   const paused = await skipIfPaused("dm", config);
   if (paused) return paused;
   const state = await readAppState(config);
@@ -2410,6 +2524,8 @@ async function withBrowser(config, fn) {
 
 async function runNetworkAccept() {
   const config = loadConfig();
+  const blocked = await skipIfProfileIncomplete("network", config);
+  if (blocked) return blocked;
   const paused = await skipIfPaused("network", config);
   if (paused) return paused;
   const state = await readAppState(config);
@@ -3504,6 +3620,8 @@ function buildResumeAttachments(jobs, config) {
 
 async function runJobsScan() {
   const config = loadConfig();
+  const blocked = await skipIfProfileIncomplete("jobs", config);
+  if (blocked) return blocked;
   const profile = await loadProfile(config);
   if (process.env.LINKEDIN_JOBS_READ_ONLY === "true") config.jobs_watcher.read_only = true;
   const paused = await skipIfPaused("jobs", config);
@@ -3684,6 +3802,8 @@ async function runJobsScan() {
  */
 async function runJobsApplyOne(identifier = process.argv[3]) {
   const config = loadConfig();
+  const blocked = await skipIfProfileIncomplete("jobs", config);
+  if (blocked) return blocked;
   const paused = await skipIfPaused("jobs", config);
   if (paused) return paused;
   const target = String(identifier || "").trim();

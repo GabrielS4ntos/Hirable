@@ -1,9 +1,10 @@
 import * as React from "react";
 import { CalendarClock, CheckCircle2, Loader2, Play, Save, TriangleAlert } from "lucide-react";
-import { api, type PipelineSchedule, type ScheduleKind, type ScheduleMode } from "@/lib/api";
+import { api, type PipelineSchedule, type ProfileGate, type ScheduleKind, type ScheduleMode } from "@/lib/api";
+import { ProfileGateBanner } from "@/components/ProfileGateBanner";
 import { usePolling } from "@/hooks/usePolling";
 import { formatDateTime, formatFullDateTime, weekdayLabel } from "@/lib/format";
-import { useI18n } from "@/lib/i18n";
+import { pipelineLabel, useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import { useToast } from "@/components/ui/toast";
 import type { PageProps } from "@/lib/page";
 import { GoogleIntegrationCard } from "@/components/GoogleIntegrationCard";
 import { GeneralSettingsCard } from "@/components/GeneralSettingsCard";
+import { AlertsCard } from "@/components/AlertsCard";
 
 const MODES: { value: ScheduleMode; label: string; hint: string }[] = [
   { value: "auto", label: "Automático", hint: "O scheduler executa sozinho conforme o agendamento." },
@@ -38,16 +40,21 @@ const CRON_PRESETS = [
 
 export function SettingsPage(_props: PageProps) {
   const pipelines = usePolling(api.listPipelines, 8000);
+  const gate = pipelines.data?.profile_gate ?? null;
 
   return (
     <div className="space-y-6">
+      <ProfileGateBanner gate={gate} onGoToProfile={() => { window.location.hash = "/perfil"; }} />
+
       <GoogleIntegrationCard />
+
+      <AlertsCard />
 
       <GeneralSettingsCard />
 
       <div className="space-y-4">
         {pipelines.data?.items.map((schedule) => (
-          <PipelineCard key={schedule.pipeline} schedule={schedule} onSaved={pipelines.refresh} />
+          <PipelineCard key={schedule.pipeline} schedule={schedule} gate={gate} onSaved={pipelines.refresh} />
         ))}
         {pipelines.loading && !pipelines.data ? <SkeletonCard /> : null}
         {pipelines.error ? (
@@ -65,9 +72,51 @@ function SkeletonCard() {
   return <div className="h-56 animate-pulse rounded-xl border border-border bg-card/50" />;
 }
 
-function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSaved: () => void }) {
+function PipelineCard({
+  schedule,
+  gate,
+  onSaved
+}: {
+  schedule: PipelineSchedule;
+  gate: ProfileGate | null;
+  onSaved: () => void;
+}) {
+  // An incomplete profile disarms the pipeline: no automatic mode, no manual run.
+  const gateBlocked = Boolean(gate && !gate.ready);
   const toast = useToast();
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
+  const en = locale === "en";
+  const modes = en ? [
+    { value: "auto" as const, label: "Automatic", hint: "The scheduler runs automatically according to the schedule." },
+    { value: "manual" as const, label: "Manual", hint: "Runs only when you click Run now." },
+    { value: "off" as const, label: "Disabled", hint: "Never runs, including manually through the scheduler." }
+  ] : MODES;
+  const kinds = en ? [
+    { value: "cron" as const, label: "Cron expression" }, { value: "interval" as const, label: "Fixed interval" }, { value: "daily_times" as const, label: "Times of day" }
+  ] : KINDS;
+  const presets = en ? [
+    { label: "Every 20 min, 8am–10pm", value: "*/20 8-22 * * *" }, { label: "3× per weekday", value: "7 9,12,16 * * 1-5" },
+    { label: "Every hour", value: "0 * * * *" }, { label: "Once a day (9am)", value: "0 9 * * *" }
+  ] : CRON_PRESETS;
+  const c = en ? {
+    saved: "Schedule saved", saveError: "Could not save", queued: "Run queued", runError: "Could not run", runNow: "Run now",
+    mode: "Mode", scheduleType: "Schedule type", allowedWindow: "Allowed window", jitter: "Jitter (seconds)", jitterHelp: "Random delay to avoid robotic timing.",
+    cron: "Cron expression", cronPlaceholder: "minute hour day month weekday", cronHelp: "minute hour day month weekday · accepts * , - / and @daily",
+    nextRuns: "Next runs", none: "None — the window blocks every time.", invalidCron: "Invalid cron expression.", interval: "Interval in minutes",
+    intervalHelp: "Counted from the end of the previous run.", times: "Times (HH:MM, comma-separated)", weekdays: "Weekdays", next: "Next:", last: "Last:", status: "Status:"
+  } : {
+    saved: "Agendamento salvo", saveError: "Erro ao salvar", queued: "Execução enfileirada", runError: "Não foi possível executar", runNow: "Executar agora",
+    mode: "Modo", scheduleType: "Forma de agendamento", allowedWindow: "Janela permitida", jitter: "Jitter (segundos)", jitterHelp: "Atraso aleatório para não parecer robótico.",
+    cron: "Expressão cron", cronPlaceholder: "minuto hora dia mês dia-da-semana", cronHelp: "minuto hora dia mês dia-da-semana · aceita * , - / e @daily",
+    nextRuns: "Próximas execuções", none: "Nenhuma — a janela bloqueia todos os horários.", invalidCron: "Expressão cron inválida.", interval: "Intervalo em minutos",
+    intervalHelp: "Contado a partir do fim da última execução.", times: "Horários (HH:MM, separados por vírgula)", weekdays: "Dias da semana", next: "Próxima:", last: "Última:", status: "Status:"
+  };
+  const scheduleLabel = pipelineLabel(schedule.pipeline, schedule.label, locale);
+  const scheduleDescription = en ? ({
+    network: "Reviews pending network invitations according to the configured policy.",
+    dm: "Checks direct messages and prepares or sends replies according to the configured policy.",
+    jobs: "Scans current-day jobs and evaluates eligible applications."
+  } as Record<string, string>)[schedule.pipeline] ?? schedule.description : schedule.description;
   const [draft, setDraft] = React.useState<PipelineSchedule>(schedule);
   const [saving, setSaving] = React.useState(false);
   const [running, setRunning] = React.useState(false);
@@ -115,10 +164,10 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
         window_end: draft.window_end,
         jitter_seconds: draft.jitter_seconds
       });
-      toast({ title: "Agendamento salvo", description: draft.label, variant: "success" });
+      toast({ title: c.saved, description: scheduleLabel, variant: "success" });
       onSaved();
     } catch (error) {
-      toast({ title: "Erro ao salvar", description: (error as Error).message, variant: "error" });
+      toast({ title: c.saveError, description: (error as Error).message, variant: "error" });
     } finally {
       setSaving(false);
     }
@@ -128,38 +177,39 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
     setRunning(true);
     try {
       await api.runPipeline(draft.pipeline);
-      toast({ title: "Execução enfileirada", description: draft.label, variant: "success" });
+      toast({ title: c.queued, description: scheduleLabel, variant: "success" });
       onSaved();
     } catch (error) {
-      toast({ title: "Não foi possível executar", description: (error as Error).message, variant: "error" });
+      toast({ title: c.runError, description: (error as Error).message, variant: "error" });
     } finally {
       setRunning(false);
     }
   }
 
-  const modeHint = MODES.find((item) => item.value === draft.mode)?.hint;
+  const modeHint = modes.find((item) => item.value === draft.mode)?.hint;
 
   return (
     <Card>
       <CardHeader className="flex-row flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
           <CardTitle className="flex items-center gap-2">
-            {schedule.label}
+            {scheduleLabel}
             <Badge variant={schedule.mode === "auto" ? "success" : schedule.mode === "off" ? "secondary" : "outline"}>
-              {MODES.find((item) => item.value === schedule.mode)?.label}
+              {modes.find((item) => item.value === schedule.mode)?.label}
             </Badge>
           </CardTitle>
-          <CardDescription>{schedule.description}</CardDescription>
+          <CardDescription>{scheduleDescription}</CardDescription>
           <p className="font-mono text-xs text-muted-foreground">npm run {schedule.command.replace(":", ":")}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={runNow} disabled={running || draft.mode === "off"}>
+          {gateBlocked ? <Badge variant="warning">{t("gate.blockedBadge")}</Badge> : null}
+          <Button variant="outline" size="sm" onClick={runNow} disabled={running || draft.mode === "off" || gateBlocked}>
             {running ? <Loader2 className="animate-spin" /> : <Play />}
-            Executar agora
+            {c.runNow}
           </Button>
-          <Button size="sm" onClick={save} disabled={!dirty || saving}>
+          <Button size="sm" onClick={save} disabled={!dirty || saving || (gateBlocked && draft.mode === "auto")}>
             {saving ? <Loader2 className="animate-spin" /> : <Save />}
-            Salvar
+            {t("common.save")}
           </Button>
         </div>
       </CardHeader>
@@ -167,24 +217,24 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
       <CardContent className="space-y-5">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <div className="space-y-1.5">
-            <Label>Modo</Label>
+            <Label>{c.mode}</Label>
             <Select value={draft.mode} onValueChange={(value) => update({ mode: value as ScheduleMode })}>
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {MODES.map((item) => (
-                  <SelectItem key={item.value} value={item.value}>
+                {modes.map((item) => (
+                  <SelectItem key={item.value} value={item.value} disabled={gateBlocked && item.value === "auto"}>
                     {item.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">{modeHint}</p>
+            <p className="text-xs text-muted-foreground">{gateBlocked ? t("error.profile_incomplete") : modeHint}</p>
           </div>
 
           <div className="space-y-1.5">
-            <Label>Forma de agendamento</Label>
+            <Label>{c.scheduleType}</Label>
             <Select
               value={draft.schedule_kind}
               onValueChange={(value) => update({ schedule_kind: value as ScheduleKind })}
@@ -194,7 +244,7 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {KINDS.map((item) => (
+                {kinds.map((item) => (
                   <SelectItem key={item.value} value={item.value}>
                     {item.label}
                   </SelectItem>
@@ -204,7 +254,7 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor={`${draft.pipeline}-start`}>Janela permitida</Label>
+            <Label htmlFor={`${draft.pipeline}-start`}>{c.allowedWindow}</Label>
             <div className="flex items-center gap-2">
               <Input
                 id={`${draft.pipeline}-start`}
@@ -224,7 +274,7 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor={`${draft.pipeline}-jitter`}>Jitter (segundos)</Label>
+            <Label htmlFor={`${draft.pipeline}-jitter`}>{c.jitter}</Label>
             <Input
               id={`${draft.pipeline}-jitter`}
               type="number"
@@ -234,7 +284,7 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
               onChange={(event) => update({ jitter_seconds: Number(event.target.value) })}
               disabled={draft.mode !== "auto"}
             />
-            <p className="text-xs text-muted-foreground">Atraso aleatório para não parecer robótico.</p>
+            <p className="text-xs text-muted-foreground">{c.jitterHelp}</p>
           </div>
         </div>
 
@@ -244,12 +294,12 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
             {draft.schedule_kind === "cron" ? (
               <div className="space-y-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor={`${draft.pipeline}-cron`}>Expressão cron</Label>
+                  <Label htmlFor={`${draft.pipeline}-cron`}>{c.cron}</Label>
                   <Input
                     id={`${draft.pipeline}-cron`}
                     value={draft.cron}
                     onChange={(event) => update({ cron: event.target.value })}
-                    placeholder="minuto hora dia mês dia-da-semana"
+                    placeholder={c.cronPlaceholder}
                     className={cn(
                       "font-mono",
                       preview && !preview.valid && "border-destructive focus-visible:ring-destructive"
@@ -257,12 +307,12 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
                     spellCheck={false}
                   />
                   <p className="font-mono text-xs text-muted-foreground">
-                    minuto hora dia mês dia-da-semana · aceita * , - / e @daily
+                    {c.cronHelp}
                   </p>
                 </div>
 
                 <div className="flex flex-wrap gap-1.5">
-                  {CRON_PRESETS.map((preset) => (
+                  {presets.map((preset) => (
                     <button
                       key={preset.value}
                       onClick={() => update({ cron: preset.value })}
@@ -278,19 +328,19 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
                     <div className="rounded-md border border-border bg-muted/40 p-3">
                       <p className="flex items-center gap-1.5 text-xs font-medium text-success">
                         <CheckCircle2 className="size-3.5" />
-                        Próximas execuções
+                        {c.nextRuns}
                       </p>
                       <ul className="mt-1.5 space-y-0.5 font-mono text-xs text-muted-foreground">
                         {preview.preview.map((item) => (
-                          <li key={item}>{formatFullDateTime(item)}</li>
+                          <li key={item}>{formatFullDateTime(item, locale)}</li>
                         ))}
-                        {preview.preview.length === 0 ? <li>Nenhuma — a janela bloqueia todos os horários.</li> : null}
+                        {preview.preview.length === 0 ? <li>{c.none}</li> : null}
                       </ul>
                     </div>
                   ) : (
                     <p className="flex items-center gap-1.5 text-xs text-destructive">
                       <TriangleAlert className="size-3.5" />
-                      Expressão cron inválida.
+                      {c.invalidCron}
                     </p>
                   )
                 ) : null}
@@ -299,7 +349,7 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
 
             {draft.schedule_kind === "interval" ? (
               <div className="max-w-xs space-y-1.5">
-                <Label htmlFor={`${draft.pipeline}-interval`}>Intervalo em minutos</Label>
+                <Label htmlFor={`${draft.pipeline}-interval`}>{c.interval}</Label>
                 <Input
                   id={`${draft.pipeline}-interval`}
                   type="number"
@@ -308,13 +358,13 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
                   value={draft.interval_minutes ?? 60}
                   onChange={(event) => update({ interval_minutes: Number(event.target.value) })}
                 />
-                <p className="text-xs text-muted-foreground">Contado a partir do fim da última execução.</p>
+                <p className="text-xs text-muted-foreground">{c.intervalHelp}</p>
               </div>
             ) : null}
 
             {draft.schedule_kind === "daily_times" ? (
               <div className="space-y-1.5">
-                <Label htmlFor={`${draft.pipeline}-times`}>Horários (HH:MM, separados por vírgula)</Label>
+                <Label htmlFor={`${draft.pipeline}-times`}>{c.times}</Label>
                 <Input
                   id={`${draft.pipeline}-times`}
                   value={draft.daily_times.join(", ")}
@@ -328,7 +378,7 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
             ) : null}
 
             <div className="space-y-2">
-              <Label>Dias da semana</Label>
+              <Label>{c.weekdays}</Label>
               <div className="flex flex-wrap gap-1.5">
                 {[0, 1, 2, 3, 4, 5, 6].map((index: number) => {
                   const label = weekdayLabel(index, t);
@@ -363,17 +413,17 @@ function PipelineCard({ schedule, onSaved }: { schedule: PipelineSchedule; onSav
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
             <CalendarClock className="size-3.5" />
-            Próxima:{" "}
+            {c.next}{" "}
             <span className="font-mono text-foreground">
-              {schedule.mode === "auto" ? formatFullDateTime(schedule.next_run_at) : "—"}
+              {schedule.mode === "auto" ? formatFullDateTime(schedule.next_run_at, locale) : "—"}
             </span>
           </span>
           <span>
-            Última: <span className="font-mono">{formatDateTime(schedule.last_run_at)}</span>
+            {c.last} <span className="font-mono">{formatDateTime(schedule.last_run_at, locale)}</span>
           </span>
           {schedule.last_status ? (
             <span>
-              Status: <span className="font-mono">{schedule.last_status}</span>
+              {c.status} <span className="font-mono">{schedule.last_status}</span>
             </span>
           ) : null}
           {schedule.schedule_error ? (

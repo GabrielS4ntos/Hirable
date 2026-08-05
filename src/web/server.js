@@ -15,6 +15,9 @@ import { PROFILE_SECTIONS, declaredDemographics, normalizeProfile, profileComple
 import { bootstrapDatabasePath, importLegacyConfig, legacyConfigExists, migratePauseConfigV1, migrateProviderRolesV1, resolveConfig } from "../config.js";
 import { EDITABLE, coerceEditable, getPath, setPath } from "../config-defaults.js";
 import { extractDocumentText } from "../document-text.js";
+import { PROFILE_GATE_CODE, profileGateState, resetProfileGateCache } from "../profile-gate.js";
+import { assertLaunchAllowed, sandboxEnv } from "../auto-fix-sandbox.js";
+import { detectSupervisor } from "../service-restart.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), "..", "..");
@@ -79,6 +82,15 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
   const routes = [];
   const route = (method, pattern, handler) => routes.push({ method, pattern, handler });
 
+  const profileGate = () => profileGateState(store, getConfig());
+
+  /** Refuses anything that would start or arm a pipeline with an unfilled profile. */
+  const requireProfile = () => {
+    const gate = profileGate();
+    if (!gate.ready) throw new HttpError(409, gate.reason, PROFILE_GATE_CODE, { missing: gate.missing });
+    return gate;
+  };
+
   /* ------------------------------------------------------------------ status */
 
   route("GET", /^\/api\/status$/, () => {
@@ -97,6 +109,7 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
       timezone: config.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
       pause: pauseStatus(config),
       onboarding: { complete: onboardingComplete },
+      profile_gate: profileGate(),
       scheduler: scheduler.status(),
       schedules,
       counts: {
@@ -157,12 +170,18 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
       complete_onboarding: canComplete
     });
 
+    // The gate changed with this write: re-arm (or park) the schedules now
+    // instead of waiting for the next tick.
+    resetProfileGateCache();
+    scheduler.refreshAllNextRuns();
+
     const stored = store.getUserProfile();
     return {
       profile,
       resume_text: stored.resume_text,
       onboarding_complete: stored.onboarding_complete,
       saved: true,
+      profile_gate: profileGate(),
       completeness,
       declared_demographics: declaredDemographics(profile)
     };
@@ -435,11 +454,14 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
       next_run_preview: nextRunOutsidePause(schedule, getConfig()).next_run_at,
       schedule_error: nextRunOutsidePause(schedule, getConfig()).error
     })),
-    available: PIPELINES
+    available: PIPELINES,
+    profile_gate: profileGate()
   }));
 
   route("PUT", /^\/api\/pipelines\/([\w-]+)$/, async (req, res, [pipeline]) => {
     const body = await readBody(req);
+    // Switching a pipeline on is arming an agent: it needs a filled profile.
+    if (body.mode === "auto") requireProfile();
     if (body.mode === "auto" && body.schedule_kind === "cron" && !isValidCron(body.cron)) {
       throw new HttpError(400, "expressão cron inválida");
     }
@@ -454,11 +476,13 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
   });
 
   route("POST", /^\/api\/pipelines\/([\w-]+)\/run$/, (req, res, [pipeline]) => {
+    requireProfile();
     let runId;
     try {
       runId = scheduler.enqueue(pipeline, "force");
     } catch (error) {
       if (error.code === "pause_active") throw new HttpError(409, "Pausa global ativa", "pause_active");
+      if (error.code === PROFILE_GATE_CODE) throw new HttpError(409, error.message, PROFILE_GATE_CODE);
       throw error;
     }
     if (!runId) throw new HttpError(409, "este pipeline já está na fila ou em execução");
@@ -495,6 +519,7 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
   });
 
   route("POST", /^\/api\/records\/([\w-]+)\/send$/, (req, res, [id]) => {
+    requireProfile();
     const record = store.getAgentRecord(id);
     if (!record) throw new HttpError(404, "registro não encontrado");
     if (!["available", "failed"].includes(record.send_state)) {
@@ -507,6 +532,7 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
       runId = scheduler.enqueueCommand("jobs", "jobs:apply-one", [record.record_id], "manual");
     } catch (error) {
       if (error.code === "pause_active") throw new HttpError(409, "Pausa global ativa", "pause_active");
+      if (error.code === PROFILE_GATE_CODE) throw new HttpError(409, error.message, PROFILE_GATE_CODE);
       throw error;
     }
     store.setSendState(record.record_id, { send_state: "in_progress", sent_by: "manual" });
@@ -634,6 +660,102 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
     for (const [key, value] of Object.entries(body)) store.setSetting(key, value);
     return { settings: store.allSettings() };
   });
+
+  /* ------------------------------------------------------------- cli agents */
+
+  route("GET", /^\/api\/cli-agents$/, () => ({
+    items: store.listCliAgents(),
+    auto_fix: autoFixState()
+  }));
+
+  route("PUT", /^\/api\/cli-agents\/([\w-]+)$/, async (req, res, [agent]) => {
+    const body = await readBody(req);
+    try {
+      const items = body.role !== undefined && Object.keys(body).length === 1
+        ? store.setCliAgentRole(agent, body.role)
+        : store.saveCliAgent(agent, body);
+      return { items, auto_fix: autoFixState() };
+    } catch (error) {
+      throw new HttpError(400, error.message);
+    }
+  });
+
+  /**
+   * Checks that the configured binary actually exists and answers, without ever
+   * asking it to change anything: `--version` is the whole interaction.
+   */
+  route("POST", /^\/api\/cli-agents\/([\w-]+)\/probe$/, async (req, res, [agent]) => {
+    const target = store.listCliAgents().find((item) => item.id === agent);
+    if (!target) throw new HttpError(404, "agente desconhecido");
+
+    const limit = store.consumeRateLimit("cli_agent_probe", { capacity: 6, refillPerSecond: 1 / 10 });
+    if (!limit.allowed) throw new HttpError(429, `Aguarde ${limit.retry_after_seconds}s antes de testar novamente`);
+
+    try {
+      assertLaunchAllowed({ command: target.command, args: target.args_template, cwd: ROOT, root: ROOT });
+    } catch (error) {
+      throw new HttpError(400, error.message, error.code || "request_failed");
+    }
+
+    return await new Promise((resolve) => {
+      const child = spawn(target.command, ["--version"], { cwd: ROOT, env: sandboxEnv(), stdio: ["ignore", "pipe", "pipe"], shell: false });
+      let output = "";
+      const timer = setTimeout(() => { child.kill("SIGKILL"); resolve({ available: false, detail: "sem resposta em 10s" }); }, 10_000);
+      timer.unref?.();
+      child.stdout.on("data", (chunk) => { output = (output + chunk).slice(0, 400); });
+      child.stderr.on("data", (chunk) => { output = (output + chunk).slice(0, 400); });
+      child.on("error", (error) => {
+        clearTimeout(timer);
+        resolve({ available: false, detail: error.code === "ENOENT" ? `comando não encontrado: ${target.command}` : error.message });
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        resolve({ available: code === 0, detail: output.trim().split("\n")[0] || `exit code ${code}` });
+      });
+    });
+  });
+
+  /**
+   * Restarts the service so a fix takes effect.
+   *
+   * Only reachable from loopback (the server binds there) and only meaningful
+   * under a supervisor, which is checked before agreeing to exit — otherwise
+   * "restart" would mean "stop".
+   */
+  route("POST", /^\/api\/service\/restart$/, () => {
+    const supervisor = detectSupervisor();
+    if (!supervisor.supervised) {
+      throw new HttpError(409, supervisor.reason, "no_supervisor");
+    }
+
+    const limit = store.consumeRateLimit("service_restart", { capacity: 3, refillPerSecond: 1 / 120 });
+    if (!limit.allowed) throw new HttpError(429, `Aguarde ${limit.retry_after_seconds}s antes de reiniciar novamente`, "rate_limited");
+
+    // Exit after the response is on the wire, so the caller learns the outcome.
+    setTimeout(() => {
+      console.log("[web] reiniciando a pedido do auto-fix");
+      scheduler.stop();
+      process.exit(0);
+    }, 250).unref?.();
+
+    return { status: "restarting", supervisor: supervisor.kind, detail: "o processo será encerrado e o supervisor o reiniciará" };
+  });
+
+  /* ----------------------------------------------------------------- alerts */
+
+  route("GET", /^\/api\/alerts$/, (req, res, params, url) => ({
+    items: store.listAlerts({ limit: url.searchParams.get("limit") || 50 }),
+    dedupe_minutes: store.getNotificationSettings().alert_dedupe_minutes
+  }));
+
+  /** Why auto-fix is or is not available, mirroring the email-delivery state. */
+  function autoFixState() {
+    const settings = store.getNotificationSettings();
+    const primary = store.listCliAgents().find((agent) => agent.role === "primary");
+    if (!primary) return { ready: false, enabled: false, reason: "nenhum_agente_principal" };
+    if (!settings.auto_fix_enabled) return { ready: true, enabled: false, reason: "desativado_pelo_usuario" };
+    return { ready: true, enabled: true, reason: "", agent: primary.id };
+  }
 
   return { routes };
 }

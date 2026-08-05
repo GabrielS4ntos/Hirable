@@ -23,6 +23,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useToast } from "@/components/ui/toast";
 import { RecordDetailDialog } from "@/components/RecordDetailDialog";
+import { ProfileGateBanner } from "@/components/ProfileGateBanner";
 
 export function JobsPage({ status }: PageProps) {
   const toast = useToast();
@@ -56,6 +57,9 @@ export function JobsPage({ status }: PageProps) {
 
   const items = records.data?.items ?? [];
   const counts = records.data?.counts ?? {};
+  // Manual sends run the same Easy Apply pipeline, so they follow the same gate.
+  const gate = status?.profile_gate ?? null;
+  const gateBlocked = Boolean(gate && !gate.ready);
 
   async function handleSend(record: AgentRecord) {
     setSending((current) => new Set(current).add(record.record_id));
@@ -80,6 +84,8 @@ export function JobsPage({ status }: PageProps) {
 
   return (
     <div className="space-y-5">
+      <ProfileGateBanner gate={gate} onGoToProfile={() => { window.location.hash = "/perfil"; }} />
+
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryTile label={t("dashboard.ready")} value={counts.available ?? 0} tone="primary" />
         <SummaryTile label={t("jobs.sent")} value={(counts.sent_auto ?? 0) + (counts.sent_manual ?? 0)} tone="success" />
@@ -228,7 +234,7 @@ export function JobsPage({ status }: PageProps) {
                               <span className="inline-block">
                                 <Button
                                   size="sm"
-                                  disabled={!isSendable(record) || busy}
+                                  disabled={!isSendable(record) || busy || gateBlocked}
                                   onClick={() => handleSend(record)}
                                 >
                                   {busy ? <Loader2 className="animate-spin" /> : <Send />}
@@ -237,7 +243,11 @@ export function JobsPage({ status }: PageProps) {
                               </span>
                             </TooltipTrigger>
                             <TooltipContent>
-                              {busy ? t("jobs.sendInProgress") : (disabledReason ?? t("jobs.sendEasyApply"))}
+                              {gateBlocked
+                                ? t("error.profile_incomplete")
+                                : busy
+                                  ? t("jobs.sendInProgress")
+                                  : (disabledReason ?? t("jobs.sendEasyApply"))}
                             </TooltipContent>
                           </Tooltip>
                         ) : (

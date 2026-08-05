@@ -216,6 +216,13 @@ The scheduler runs inside `npm start`. It ticks every 30 seconds and executes **
 at a time**, because they share a single Chromium profile. Every execution is recorded in
 `pipeline_runs` and shown on the dashboard.
 
+**Pipelines stay disarmed until your profile is complete.** Automatic mode cannot be
+selected, "Run now" and the manual "Send" button are disabled, no next run is scheduled, and
+a direct CLI invocation exits with `status: "skipped"`, `code: "profile_incomplete"`. The
+agents treat the profile as their only trusted source of facts about you, so running without
+it would mean acting on guesses. Fill the required fields on the profile screen and the
+schedules re-arm on the next tick.
+
 ## Safety model
 
 **Standardized records.** Jobs, DMs and invitations are normalized into one shape and share
@@ -251,6 +258,47 @@ or a token. Provider error messages are redacted before being displayed.
 
 **Email.** Delivery stays off until an account is connected, a recipient is saved and you
 explicitly enable it. Disconnecting the account turns it back off.
+
+## Alerts and auto-fix
+
+**One failure, one email.** Alerts are grouped by a fingerprint of *what broke* — command,
+status and a normalized message with ids, paths, timestamps and numbers removed — so the same
+failure about thirty different jobs is one group. The first occurrence is delivered; repeats
+inside the silence window (default 2h, configurable, `0` disables grouping) are counted but
+stay silent, and the suppressed count rides along on the next email that goes out. Nothing is
+lost: every occurrence is still written to `logs/alerts.jsonl` and to the `alert_events` table.
+
+Emails are HTML with a plain-text alternative, showing the failure, how many times it has
+happened, and the auto-fix outcome when it ran.
+
+**Auto-fix** is off by default. When enabled, a failure is also handed to a coding-agent CLI —
+Claude Code, Codex, opencode or Agy — which investigates, fixes, runs `npm test` and restarts
+the service itself. Agents use the same role model as the model providers: the first one
+enabled becomes primary, the second its fallback, tried in order when the primary fails or is
+not installed.
+
+The agent runs in a sandbox built from three layers:
+
+| Layer | What it does |
+|---|---|
+| Restricted `PATH` | The process starts with a generated bin directory containing symlinks to an allowlist only: read-only inspection (`cat`, `grep`, `find`, `sed`…), `node`/`npm`/`npx`, and the agent's own binary. `git`, `curl`, `rm`, `sudo`, `docker` and everything else simply do not exist for it. |
+| CLI permission flags | Each agent is also launched with its own deny flags, as a second opinion. |
+| The instruction | States the boundaries in words, and frames the error text as untrusted data. |
+
+The first layer is what holds when the other two are ignored. This app's secrets are stripped
+from the agent's environment; the agent's own credentials are preserved so it can authenticate.
+
+**Prompt injection.** The failure message can contain a LinkedIn page title or a model
+response — text nobody on your side wrote. It is sanitized (backticks and control characters
+removed, length capped), quoted inside explicit `<<<ERRO_INICIO>>>`/`<<<ERRO_FIM>>>` markers it
+cannot close, and preceded by an instruction to treat everything inside as data and to report
+any attempt to issue orders from within it.
+
+**Restart.** The agent restarts through exactly one path, `npm run service:restart`, which asks
+the running server to exit so the supervisor starts it again. It only works when something is
+actually supervising the process — Docker's `restart: unless-stopped`, launchd's `KeepAlive`,
+or `AGENT_SUPERVISED=1` — and refuses otherwise, because exiting unsupervised would stop the
+service instead of restarting it. Changes are left in the working tree: the agent has no git.
 
 ## Architecture
 
@@ -289,7 +337,7 @@ npm run profile:extract < cv.txt   # profile extraction, prints JSON
 npm run auth:status             # keys and Google token status
 npm run storage:status          # database summary
 npm run validate                # configuration sanity check
-npm test                        # 148 unit tests
+npm test                        # unit tests
 ```
 
 `npm run jobs:form-smoke -- <url>` opens exactly one Easy Apply form with

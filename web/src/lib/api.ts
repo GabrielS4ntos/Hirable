@@ -142,10 +142,20 @@ export type ProfilePayload = {
   sections: ProfileSection[];
 };
 
+/** Pipelines stay disarmed until the profile the agents rely on is filled in. */
+export type ProfileGate = {
+  ready: boolean;
+  code: string | null;
+  reason: string | null;
+  missing: string[];
+  onboarding_complete: boolean;
+};
+
 export type StatusPayload = {
   now: string;
   timezone: string;
   onboarding: { complete: boolean };
+  profile_gate: ProfileGate;
   scheduler: {
     running: { pipeline: string; run_id: string; started_at: string } | null;
     queued: { pipeline: string; run_id: string; trigger: string }[];
@@ -188,7 +198,46 @@ export type NotificationSettings = {
   job_digest_enabled: boolean;
   calendar_enabled: boolean;
   calendar_id: string;
+  /** Silence window for an identical failure. 0 disables deduplication. */
+  alert_dedupe_minutes: number;
+  auto_fix_enabled: boolean;
   updated_at: string | null;
+};
+
+/** A coding-agent CLI that can be handed a failure. Same role model as providers. */
+export type CliAgent = {
+  id: string;
+  label: string;
+  command: string;
+  args_template: string[];
+  docs_url: string;
+  install_hint: string;
+  role: string;
+  enabled: boolean;
+  configured: boolean;
+  last_status: string;
+  last_error: string;
+  last_run_at: string | null;
+  run_count: number;
+};
+
+export type AutoFixState = { ready: boolean; enabled: boolean; reason: string; agent?: string };
+
+export type AlertEvent = {
+  fingerprint: string;
+  level: string;
+  command: string;
+  status: string;
+  message: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  occurrences: number;
+  notified_at: string | null;
+  notified_count: number;
+  occurrences_since_notify: number;
+  auto_fix_at: string | null;
+  auto_fix_status: string;
+  auto_fix_agent: string;
 };
 
 export type IntegrationsPayload = {
@@ -363,6 +412,21 @@ export const api = {
       { method: "PUT", body: JSON.stringify(patch) }
     ),
 
+  listCliAgents: () => request<{ items: CliAgent[]; auto_fix: AutoFixState }>("/api/cli-agents"),
+  saveCliAgent: (
+    agent: string,
+    patch: { command?: string; args_template?: string | string[]; enabled?: boolean; make_primary?: boolean; role?: string }
+  ) =>
+    request<{ items: CliAgent[]; auto_fix: AutoFixState }>(`/api/cli-agents/${agent}`, {
+      method: "PUT",
+      body: JSON.stringify(patch)
+    }),
+  probeCliAgent: (agent: string) =>
+    request<{ available: boolean; detail: string }>(`/api/cli-agents/${agent}/probe`, { method: "POST" }),
+
+  listAlerts: (limit = 50) =>
+    request<{ items: AlertEvent[]; dedupe_minutes: number }>(`/api/alerts?limit=${limit}`),
+
   getConfig: () => request<ConfigPayload>("/api/config"),
   saveConfig: (values: Record<string, any>) =>
     request<{ applied: string[]; rejected: { path: string; error: string }[]; fields: ConfigField[] }>("/api/config", {
@@ -370,7 +434,7 @@ export const api = {
       body: JSON.stringify({ values })
     }),
 
-  listPipelines: () => request<{ items: PipelineSchedule[] }>("/api/pipelines"),
+  listPipelines: () => request<{ items: PipelineSchedule[]; profile_gate: ProfileGate }>("/api/pipelines"),
   updatePipeline: (pipeline: string, patch: Partial<PipelineSchedule>) =>
     request<{ item: PipelineSchedule }>(`/api/pipelines/${pipeline}`, { method: "PUT", body: JSON.stringify(patch) }),
   runPipeline: (pipeline: string) => request<{ run_id: string }>(`/api/pipelines/${pipeline}/run`, { method: "POST" }),

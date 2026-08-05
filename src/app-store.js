@@ -1,5 +1,7 @@
 import crypto from "node:crypto";
 import { PROVIDERS, PROVIDER_IDS, ROLES, applyRoleChange, getProvider, rolesAfterConfiguring } from "./providers.js";
+import { CLI_AGENTS, getCliAgent, parseArgsTemplate } from "./cli-agents.js";
+import { DEFAULT_DEDUPE_MINUTES, fingerprintAlert, shouldNotify } from "./alert-dedupe.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -202,6 +204,41 @@ export class AppStore {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS cli_agents (
+        agent TEXT PRIMARY KEY,
+        -- No secret column on purpose: these CLIs carry their own credentials.
+        command TEXT NOT NULL DEFAULT '',
+        args_json TEXT NOT NULL DEFAULT '[]',
+        role TEXT NOT NULL DEFAULT 'none' CHECK (role IN ('primary', 'fallback', 'none')),
+        enabled INTEGER NOT NULL DEFAULT 1,
+        last_status TEXT NOT NULL DEFAULT '',
+        last_error TEXT NOT NULL DEFAULT '',
+        last_run_at TEXT,
+        run_count INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+      );
+
+      -- One row per distinct failure, not per occurrence: this is what keeps the
+      -- mailbox from filling up with the same error every tick.
+      CREATE TABLE IF NOT EXISTS alert_events (
+        fingerprint TEXT PRIMARY KEY,
+        level TEXT NOT NULL DEFAULT 'error',
+        command TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT '',
+        message TEXT NOT NULL DEFAULT '',
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        occurrences INTEGER NOT NULL DEFAULT 1,
+        notified_at TEXT,
+        notified_count INTEGER NOT NULL DEFAULT 0,
+        occurrences_since_notify INTEGER NOT NULL DEFAULT 0,
+        auto_fix_at TEXT,
+        auto_fix_status TEXT NOT NULL DEFAULT '',
+        auto_fix_agent TEXT NOT NULL DEFAULT ''
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_alert_events_last_seen ON alert_events(last_seen_at DESC);
+
       CREATE TABLE IF NOT EXISTS resume_documents (
         id TEXT PRIMARY KEY,
         label TEXT NOT NULL,
@@ -233,6 +270,7 @@ export class AppStore {
       );
     `);
     this.#migrateApiKeyProviders();
+    this.#migrateNotificationColumns();
     try { fs.chmodSync(databasePath, 0o600); } catch {}
     this.ensureDefaultSchedules();
   }
@@ -272,6 +310,25 @@ export class AppStore {
     } catch (error) {
       this.db.exec("ROLLBACK");
       throw error;
+    }
+  }
+
+  /**
+   * Adds the alert-throttling and auto-fix columns to an existing install.
+   *
+   * Plain ADD COLUMN with defaults, so an older database keeps its notification
+   * preferences instead of being reset by the upgrade.
+   */
+  #migrateNotificationColumns() {
+    const columns = new Set(
+      this.db.prepare("PRAGMA table_info(notification_settings)").all().map((row) => row.name)
+    );
+    const additions = [
+      ["alert_dedupe_minutes", `INTEGER NOT NULL DEFAULT ${DEFAULT_DEDUPE_MINUTES}`],
+      ["auto_fix_enabled", "INTEGER NOT NULL DEFAULT 0"]
+    ];
+    for (const [name, definition] of additions) {
+      if (!columns.has(name)) this.db.exec(`ALTER TABLE notification_settings ADD COLUMN ${name} ${definition}`);
     }
   }
 
@@ -358,6 +415,219 @@ export class AppStore {
       .map((item) => ({ provider: item.id, role: item.role, configured: item.configured }));
     this.#writeRoles(rolesAfterConfiguring(current, provider, { makePrimary }));
     return this.listProviders();
+  }
+
+  /* -------------------------------------------------------------- cli agents */
+
+  /**
+   * Coding-agent CLIs, with the same role model as the model providers.
+   *
+   * "Configured" means enabled with a command — there is no key to check, so a
+   * freshly listed agent is usable as soon as the user turns it on.
+   */
+  listCliAgents() {
+    const rows = this.db.prepare("SELECT * FROM cli_agents").all();
+    const byId = new Map(rows.map((row) => [row.agent, row]));
+
+    return CLI_AGENTS.map((agent) => {
+      const row = byId.get(agent.id);
+      const enabled = row ? Boolean(row.enabled) : false;
+      // Settling roles writes placeholder rows for agents the user never touched,
+      // so an empty template means "never customized", not "customized to empty".
+      const stored = row ? safeParse(row.args_json) : null;
+      return {
+        ...agent,
+        command: row?.command || agent.command,
+        args_template: Array.isArray(stored) && stored.length ? stored : agent.args_template,
+        role: enabled ? (row?.role || "none") : "none",
+        enabled,
+        configured: enabled,
+        last_status: row?.last_status || "",
+        last_error: row?.last_error || "",
+        last_run_at: row?.last_run_at || null,
+        run_count: Number(row?.run_count || 0),
+        updated_at: row?.updated_at || null
+      };
+    });
+  }
+
+  primaryCliAgent() {
+    return this.listCliAgents().find((agent) => agent.role === "primary") || null;
+  }
+
+  /** Primary first, then fallback: the order the auto-fix tries them in. */
+  cliAgentChain() {
+    const agents = this.listCliAgents();
+    return [
+      agents.find((agent) => agent.role === "primary"),
+      agents.find((agent) => agent.role === "fallback")
+    ].filter(Boolean);
+  }
+
+  #writeCliAgentRoles(roles) {
+    const timestamp = nowIso();
+    const statement = this.db.prepare(`
+      INSERT INTO cli_agents (agent, command, args_json, role, enabled, updated_at)
+      VALUES (?, '', '[]', ?, 0, ?)
+      ON CONFLICT(agent) DO UPDATE SET role = excluded.role, updated_at = excluded.updated_at
+    `);
+    for (const [agent, role] of Object.entries(roles)) statement.run(agent, role, timestamp);
+  }
+
+  saveCliAgent(agent, { command, args_template, enabled, make_primary = false } = {}) {
+    const known = getCliAgent(agent);
+    if (!known) throw new Error(`agente desconhecido: ${agent}`);
+
+    const current = this.listCliAgents().find((item) => item.id === agent);
+    const nextCommand = command === undefined
+      ? current.command
+      : String(command || "").trim().slice(0, 200) || known.command;
+    // A command with a path separator would escape the sandbox by definition.
+    if (/[/\\]/.test(nextCommand)) throw new Error("informe apenas o nome do executável, sem caminho");
+
+    const nextArgs = args_template === undefined
+      ? current.args_template
+      : parseArgsTemplate(args_template, known.args_template);
+    if (!nextArgs.some((item) => item.includes("{prompt}") || item.includes("{file}"))) {
+      throw new Error("os argumentos precisam conter {prompt} ou {file}");
+    }
+
+    const nextEnabled = enabled === undefined ? current.enabled : Boolean(enabled);
+    const timestamp = nowIso();
+    this.db.prepare(`
+      INSERT INTO cli_agents (agent, command, args_json, role, enabled, updated_at)
+      VALUES (?, ?, ?, 'none', ?, ?)
+      ON CONFLICT(agent) DO UPDATE SET
+        command = excluded.command,
+        args_json = excluded.args_json,
+        enabled = excluded.enabled,
+        updated_at = excluded.updated_at
+    `).run(agent, nextCommand, JSON.stringify(nextArgs), nextEnabled ? 1 : 0, timestamp);
+
+    if (nextEnabled) {
+      const listed = this.listCliAgents()
+        .map((item) => ({ provider: item.id, role: item.role, configured: item.configured }));
+      this.#writeCliAgentRoles(rolesAfterConfiguring(listed, agent, { makePrimary: make_primary }));
+    } else {
+      // Disabling must not leave the chain pointing at something that cannot run.
+      this.#writeCliAgentRoles(
+        applyRoleChange(
+          this.listCliAgents().map((item) => ({ provider: item.id, role: item.role, configured: item.configured })),
+          agent,
+          "none"
+        )
+      );
+    }
+    return this.listCliAgents();
+  }
+
+  setCliAgentRole(agent, role) {
+    if (!getCliAgent(agent)) throw new Error(`agente desconhecido: ${agent}`);
+    if (!ROLES.includes(role)) throw new Error(`papel deve ser um de: ${ROLES.join(", ")}`);
+    const current = this.listCliAgents();
+    const target = current.find((item) => item.id === agent);
+    if (role !== "none" && !target?.enabled) throw new Error("ative o agente antes de dar um papel a ele");
+
+    this.#writeCliAgentRoles(
+      applyRoleChange(current.map((item) => ({ provider: item.id, role: item.role, configured: item.configured })), agent, role)
+    );
+    return this.listCliAgents();
+  }
+
+  recordCliAgentRun(agent, { status, error = "" } = {}) {
+    this.db.prepare(`
+      UPDATE cli_agents
+      SET last_status = ?, last_error = ?, last_run_at = ?, run_count = run_count + 1, updated_at = ?
+      WHERE agent = ?
+    `).run(String(status || "").slice(0, 40), redactSecrets(String(error || "")).slice(0, 2000), nowIso(), nowIso(), String(agent));
+    return this.listCliAgents();
+  }
+
+  /* ------------------------------------------------------------------ alerts */
+
+  /**
+   * Registers one alert occurrence and answers whether it should be delivered.
+   *
+   * The counter and the decision are computed in a single transaction: two
+   * pipelines failing at the same instant must not both conclude they are the
+   * first, which is exactly how duplicate emails start.
+   *
+   * @returns {{fingerprint: string, notify: boolean, reason: string, suppressed: number, occurrences: number, first_seen_at: string}}
+   */
+  recordAlert(alert = {}, { windowMinutes = DEFAULT_DEDUPE_MINUTES, now = new Date() } = {}) {
+    const fingerprint = fingerprintAlert(alert);
+    const timestamp = now.toISOString();
+    const message = redactSecrets(String(alert.message || "")).slice(0, 8000);
+
+    const decide = this.db.prepare("SELECT * FROM alert_events WHERE fingerprint = ?");
+    const insert = this.db.prepare(`
+      INSERT INTO alert_events (
+        fingerprint, level, command, status, message,
+        first_seen_at, last_seen_at, occurrences, notified_at, notified_count, occurrences_since_notify
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)
+    `);
+    const update = this.db.prepare(`
+      UPDATE alert_events
+      SET message = ?, last_seen_at = ?, occurrences = occurrences + 1,
+          notified_at = ?, notified_count = ?, occurrences_since_notify = ?
+      WHERE fingerprint = ?
+    `);
+
+    // BEGIN IMMEDIATE takes the write lock up front: two processes failing at the
+    // same instant must not both read "never notified" and both send an email.
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const previous = decide.get(fingerprint) || null;
+      const verdict = shouldNotify(previous, windowMinutes, now);
+
+      if (!previous) {
+        insert.run(
+          fingerprint,
+          String(alert.level || "error"),
+          String(alert.command || ""),
+          String(alert.status || ""),
+          message,
+          timestamp,
+          timestamp,
+          verdict.notify ? timestamp : null,
+          verdict.notify ? 1 : 0,
+          verdict.notify ? 0 : 1
+        );
+        this.db.exec("COMMIT");
+        return { fingerprint, ...verdict, occurrences: 1, first_seen_at: timestamp };
+      }
+
+      update.run(
+        message,
+        timestamp,
+        verdict.notify ? timestamp : previous.notified_at,
+        Number(previous.notified_count) + (verdict.notify ? 1 : 0),
+        verdict.notify ? 0 : Number(previous.occurrences_since_notify) + 1,
+        fingerprint
+      );
+      this.db.exec("COMMIT");
+      return {
+        fingerprint,
+        ...verdict,
+        occurrences: Number(previous.occurrences) + 1,
+        first_seen_at: previous.first_seen_at
+      };
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  markAlertAutoFix(fingerprint, { status, agent = "" } = {}) {
+    this.db.prepare(`
+      UPDATE alert_events SET auto_fix_at = ?, auto_fix_status = ?, auto_fix_agent = ? WHERE fingerprint = ?
+    `).run(nowIso(), String(status || "").slice(0, 40), String(agent || "").slice(0, 40), String(fingerprint));
+  }
+
+  listAlerts({ limit = 50 } = {}) {
+    return this.db.prepare(`
+      SELECT * FROM alert_events ORDER BY last_seen_at DESC LIMIT ?
+    `).all(Math.min(Number(limit) || 50, 200));
   }
 
   /* ---------------------------------------------------------------- api keys */
@@ -880,6 +1150,8 @@ export class AppStore {
         job_digest_enabled: false,
         calendar_enabled: false,
         calendar_id: "primary",
+        alert_dedupe_minutes: DEFAULT_DEDUPE_MINUTES,
+        auto_fix_enabled: false,
         updated_at: null
       };
     }
@@ -892,6 +1164,8 @@ export class AppStore {
       job_digest_enabled: Boolean(row.job_digest_enabled),
       calendar_enabled: Boolean(row.calendar_enabled),
       calendar_id: row.calendar_id || "primary",
+      alert_dedupe_minutes: Number(row.alert_dedupe_minutes ?? DEFAULT_DEDUPE_MINUTES),
+      auto_fix_enabled: Boolean(row.auto_fix_enabled),
       updated_at: row.updated_at
     };
   }
@@ -936,12 +1210,25 @@ export class AppStore {
     let calendarEnabled = wantsCalendar;
     if (wantsCalendar && !oauth.connected) { calendarEnabled = false; refused.push("conecte uma conta Google antes de ativar a agenda"); }
 
+    // Auto-fix hands a failure to an external coding agent that edits this
+    // repository, so it needs an agent that can actually run.
+    const wantsAutoFix = patch.auto_fix_enabled === undefined ? current.auto_fix_enabled : Boolean(patch.auto_fix_enabled);
+    let autoFixEnabled = wantsAutoFix;
+    if (wantsAutoFix && !this.listCliAgents().some((agent) => agent.role === "primary")) {
+      autoFixEnabled = false;
+      refused.push("configure um agente de CLI principal antes de ativar o auto-fix");
+    }
+
+    const dedupeMinutes = patch.alert_dedupe_minutes === undefined
+      ? current.alert_dedupe_minutes
+      : clampInt(patch.alert_dedupe_minutes, 0, 1440, DEFAULT_DEDUPE_MINUTES);
+
     const timestamp = nowIso();
     this.db.prepare(`
       INSERT INTO notification_settings (
         id, email_enabled, email_to, email_from, alert_on_error, macos_notification,
-        job_digest_enabled, calendar_enabled, calendar_id, updated_at
-      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        job_digest_enabled, calendar_enabled, calendar_id, alert_dedupe_minutes, auto_fix_enabled, updated_at
+      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         email_enabled = excluded.email_enabled,
         email_to = excluded.email_to,
@@ -951,6 +1238,8 @@ export class AppStore {
         job_digest_enabled = excluded.job_digest_enabled,
         calendar_enabled = excluded.calendar_enabled,
         calendar_id = excluded.calendar_id,
+        alert_dedupe_minutes = excluded.alert_dedupe_minutes,
+        auto_fix_enabled = excluded.auto_fix_enabled,
         updated_at = excluded.updated_at
     `).run(
       emailEnabled ? 1 : 0,
@@ -961,6 +1250,8 @@ export class AppStore {
       (patch.job_digest_enabled === undefined ? current.job_digest_enabled : Boolean(patch.job_digest_enabled)) ? 1 : 0,
       calendarEnabled ? 1 : 0,
       String(patch.calendar_id === undefined ? current.calendar_id : (patch.calendar_id || "primary")).slice(0, 200),
+      dedupeMinutes,
+      autoFixEnabled ? 1 : 0,
       timestamp
     );
 
@@ -1236,6 +1527,12 @@ function safeParse(value) {
   } catch {
     return undefined;
   }
+}
+
+function clampInt(value, min, max, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(parsed)));
 }
 
 export function normalizeClock(value) {

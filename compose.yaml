@@ -4,6 +4,10 @@ services:
     image: linkedin-local-agent
     container_name: linkedin-local-agent
     restart: unless-stopped
+    environment:
+      # Tells the service a supervisor is watching, so the auto-fix agent is
+      # allowed to restart it: exiting here means Docker starts it again.
+      AGENT_SUPERVISED: "1"
     # Bound to loopback: this is a personal console, never expose it to a network.
     ports:
       - "127.0.0.1:4321:4321"

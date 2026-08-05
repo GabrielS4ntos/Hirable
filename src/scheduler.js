@@ -3,6 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { nextRunForSchedule } from "./cron.js";
 import { canStartDuringPause, nextRunOutsidePause } from "./pause.js";
+import { PROFILE_GATE_CODE, profileGateError, profileGateState } from "./profile-gate.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), "..");
@@ -42,10 +43,12 @@ export function nextInboxPair(networkSchedule, dmSchedule, from = new Date(), of
   return { network: null, dm: null, error: "no complete future inbox pair" };
 }
 
-/** Keeps a real status, but never leaves a stale schedule_error behind. */
+/** Keeps a real status, but never leaves a stale schedule_error or block behind. */
 function statusAfterResolve(schedule, error) {
   if (error) return `schedule_error: ${error}`;
-  return String(schedule?.last_status || "").startsWith("schedule_error") ? null : schedule?.last_status;
+  const current = String(schedule?.last_status || "");
+  const stale = current.startsWith("schedule_error") || current.startsWith("blocked:");
+  return stale ? null : schedule?.last_status;
 }
 
 /**
@@ -55,8 +58,9 @@ function statusAfterResolve(schedule, error) {
  * executes at most one pipeline at a time and queues everything else.
  */
 export class Scheduler {
-  constructor(store, { tickMs = DEFAULT_TICK_MS, maxRuntimeMs = DEFAULT_MAX_RUNTIME_MS, logger = console, getConfig = null } = {}) {
+  constructor(store, { tickMs = DEFAULT_TICK_MS, maxRuntimeMs = DEFAULT_MAX_RUNTIME_MS, logger = console, getConfig = null, profileGate = null } = {}) {
     this.store = store;
+    this.profileGate = profileGate || (() => profileGateState(this.store, this.getConfig()));
     this.tickMs = tickMs;
     this.maxRuntimeMs = maxRuntimeMs;
     this.logger = logger;
@@ -97,6 +101,7 @@ export class Scheduler {
 
   /** Recomputes next_run_at for every pipeline (called on boot and after edits). */
   refreshAllNextRuns(from = new Date()) {
+    if (!this.profileGate().ready) return this.#blockAutomaticSchedules();
     const schedules = this.store.listSchedules();
     if (schedules.some((schedule) => INBOX_PIPELINES.has(schedule.pipeline))) this.refreshInboxPair(from);
     for (const schedule of schedules) {
@@ -137,6 +142,10 @@ export class Scheduler {
   }
 
   refreshNextRun(pipeline, from = new Date()) {
+    if (!this.profileGate().ready) {
+      this.#blockAutomaticSchedules();
+      return null;
+    }
     if (INBOX_PIPELINES.has(pipeline)) return this.refreshInboxPair(from)[pipeline];
     const schedule = this.store.getSchedule(pipeline);
     if (!schedule) return null;
@@ -150,6 +159,14 @@ export class Scheduler {
 
   async tick() {
     const now = new Date();
+    const gate = this.profileGate();
+    if (!gate.ready) {
+      // Nothing may start, and no future slot is advertised while the profile is
+      // incomplete. Slots are recomputed by the next tick after it is filled.
+      this.#blockAutomaticSchedules();
+      this.#drain();
+      return;
+    }
     for (const schedule of this.store.listSchedules()) {
       if (schedule.mode !== "auto") {
         if (schedule.next_run_at) this.store.setScheduleRuntime(schedule.pipeline, { next_run_at: null });
@@ -172,6 +189,18 @@ export class Scheduler {
     this.#drain();
   }
 
+  /** Parks every automatic schedule while the profile gate is closed. */
+  #blockAutomaticSchedules() {
+    for (const schedule of this.store.listSchedules()) {
+      if (schedule.mode !== "auto") continue;
+      if (schedule.next_run_at === null && schedule.last_status === `blocked: ${PROFILE_GATE_CODE}`) continue;
+      this.store.setScheduleRuntime(schedule.pipeline, {
+        next_run_at: null,
+        last_status: `blocked: ${PROFILE_GATE_CODE}`
+      });
+    }
+  }
+
   /**
    * Queues a pipeline execution. Returns the queued/running run id, or null when
    * the pipeline is already queued or running.
@@ -181,6 +210,14 @@ export class Scheduler {
     if (!schedule) throw new Error(`pipeline desconhecido: ${pipeline}`);
     if (trigger === "auto" && schedule.mode !== "auto") return null;
     if (schedule.mode === "off" && trigger !== "force") return null;
+
+    // The profile is the agents' only trusted source of facts, so an incomplete
+    // one blocks every trigger, including a forced manual run.
+    const gate = this.profileGate();
+    if (!gate.ready) {
+      if (trigger === "auto") return null;
+      throw profileGateError(gate);
+    }
 
     const pauseDecision = canStartDuringPause(this.getConfig(), trigger);
     if (!pauseDecision.allowed) {
@@ -203,6 +240,8 @@ export class Scheduler {
 
   /** Queues an arbitrary CLI command that is not a scheduled pipeline (manual actions). */
   enqueueCommand(pipeline, command, args = [], trigger = "manual") {
+    const gate = this.profileGate();
+    if (!gate.ready) throw profileGateError(gate);
     const pauseDecision = canStartDuringPause(this.getConfig(), trigger);
     if (!pauseDecision.allowed) {
       const error = new Error("pause_active");
@@ -235,17 +274,30 @@ export class Scheduler {
       return;
     }
     const [job] = this.queue.splice(nextIndex, 1);
+
+    // Last checkpoint before spawning: the profile may have been reset while the
+    // job waited in the queue.
+    const gate = this.profileGate();
+    if (!gate.ready) {
+      this.#skip(job, `${PROFILE_GATE_CODE}_before_start`);
+      return;
+    }
+
     const pauseDecision = canStartDuringPause(this.getConfig(), job.trigger);
     if (!pauseDecision.allowed) {
-      const summary = { status: "skipped", code: "pause_active_before_start" };
-      this.store.finishRun(job.runId, { status: "skipped", summary });
-      this.store.setScheduleRuntime(job.pipeline, { last_status: "skipped:pause_active_before_start" });
-      if (job.trigger === "auto") this.refreshNextRun(job.pipeline);
-      this.#emit({ type: "finished", pipeline: job.pipeline, runId: job.runId, status: "skipped", summary });
-      this.#drain();
+      this.#skip(job, "pause_active_before_start");
       return;
     }
     this.#execute(job);
+  }
+
+  #skip(job, code) {
+    const summary = { status: "skipped", code };
+    this.store.finishRun(job.runId, { status: "skipped", summary });
+    this.store.setScheduleRuntime(job.pipeline, { last_status: `skipped:${code}` });
+    if (job.trigger === "auto") this.refreshNextRun(job.pipeline);
+    this.#emit({ type: "finished", pipeline: job.pipeline, runId: job.runId, status: "skipped", summary });
+    this.#drain();
   }
 
   #execute(job) {

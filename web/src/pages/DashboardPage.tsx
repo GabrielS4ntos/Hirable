@@ -11,6 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { localizedError, pipelineLabel, useI18n } from "@/lib/i18n";
+import { ProfileGateBanner } from "@/components/ProfileGateBanner";
 
 export function DashboardPage({ status, refreshStatus }: PageProps) {
   const toast = useToast();
@@ -20,6 +21,8 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
 
   const jobCounts = status?.counts.job ?? {};
   const totalJobs = Object.values(jobCounts).reduce((sum, value) => sum + value, 0);
+  const gate = status?.profile_gate ?? null;
+  const gateBlocked = Boolean(gate && !gate.ready);
 
   async function runNow(pipeline: string) {
     setStarting(pipeline);
@@ -37,6 +40,8 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
 
   return (
     <div className="space-y-6">
+      <ProfileGateBanner gate={gate} onGoToProfile={() => { window.location.hash = "/perfil"; }} />
+
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard label={t("dashboard.jobsAnalyzed")} value={totalJobs} hint={t("dashboard.standardRecords")} />
         <MetricCard label={t("dashboard.ready")} value={jobCounts.available ?? 0} tone="primary" hint={t("dashboard.awaitingDecision")} />
@@ -89,7 +94,7 @@ export function DashboardPage({ status, refreshStatus }: PageProps) {
                 variant="outline"
                 size="sm"
                 className="w-full"
-                disabled={starting === schedule.pipeline || schedule.mode === "off"}
+                disabled={starting === schedule.pipeline || schedule.mode === "off" || gateBlocked}
                 onClick={() => runNow(schedule.pipeline)}
               >
                 {starting === schedule.pipeline ? <Loader2 className="animate-spin" /> : <Play />}

@@ -19,6 +19,15 @@
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <!--
+    KeepAlive is what makes a restart a restart: the auto-fix agent asks the
+    service to exit and launchd starts it again.
+  -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>AGENT_SUPERVISED</key>
+    <string>1</string>
+  </dict>
   <key>StandardOutPath</key>
   <string>__PROJECT_DIR__/logs/web.out.log</string>
   <key>StandardErrorPath</key>

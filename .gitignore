@@ -14,3 +14,4 @@ data/
 launchd/*.plist
 web/node_modules/
 web/dist/
+.autofix-bin/

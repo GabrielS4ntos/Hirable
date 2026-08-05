@@ -64,12 +64,24 @@ import os from "node:os";
 import path from "node:path";
 import { AppStore } from "./app-store.js";
 import { Scheduler } from "./scheduler.js";
+import { PROFILE_GATE_CODE } from "./profile-gate.js";
 
 function freshStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "scheduler-"));
   const store = new AppStore(path.join(dir, "test.sqlite"));
   return { store, cleanup: () => { store.close(); fs.rmSync(dir, { recursive: true, force: true }); } };
 }
+
+// Scheduling tests are about schedules, so the profile gate is injected instead
+// of being resolved from whatever profile happens to exist on this machine.
+const openGate = () => ({ ready: true, code: null, reason: null, missing: [], onboarding_complete: true });
+const closedGate = () => ({
+  ready: false,
+  code: PROFILE_GATE_CODE,
+  reason: "perfil incompleto",
+  missing: ["identity.full_name"],
+  onboarding_complete: false
+});
 
 test("a valid but non-pairable inbox combination schedules independently", () => {
   const { store, cleanup } = freshStore();
@@ -78,7 +90,7 @@ test("a valid but non-pairable inbox combination schedules independently", () =>
     store.updateSchedule("dm", { mode: "auto", schedule_kind: "interval", interval_minutes: 20 });
     store.updateSchedule("network", { mode: "manual" });
 
-    const scheduler = new Scheduler(store, { tickMs: 0 });
+    const scheduler = new Scheduler(store, { tickMs: 0, profileGate: openGate });
     scheduler.refreshInboxPair(at(2026, 8, 5, 10, 0));
 
     const dm = store.getSchedule("dm");
@@ -99,7 +111,7 @@ test("a genuinely impossible schedule still reports an error", () => {
     store.updateSchedule("jobs", {
       mode: "auto", schedule_kind: "cron", cron: "0 3 * * *", window_start: "08:00", window_end: "22:00"
     });
-    const scheduler = new Scheduler(store, { tickMs: 0 });
+    const scheduler = new Scheduler(store, { tickMs: 0, profileGate: openGate });
     scheduler.refreshNextRun("jobs", at(2026, 8, 5, 10, 0));
 
     const jobs = store.getSchedule("jobs");
@@ -114,7 +126,7 @@ test("a disabled pipeline is never queued automatically nor manually", () => {
   const { store, cleanup } = freshStore();
   try {
     store.updateSchedule("jobs", { mode: "off" });
-    const scheduler = new Scheduler(store, { tickMs: 0 });
+    const scheduler = new Scheduler(store, { tickMs: 0, profileGate: openGate });
 
     // Refusals do not spawn anything, which is what makes them safe to assert here.
     assert.equal(scheduler.enqueue("jobs", "auto"), null);
@@ -131,7 +143,7 @@ test("a disabled pipeline is never queued automatically nor manually", () => {
 test("a stale schedule error is cleared once the schedule resolves again", () => {
   const { store, cleanup } = freshStore();
   try {
-    const scheduler = new Scheduler(store, { tickMs: 0 });
+    const scheduler = new Scheduler(store, { tickMs: 0, profileGate: openGate });
 
     // Impossible: 03:00 never falls inside an 08:00-22:00 window.
     store.updateSchedule("jobs", { mode: "auto", schedule_kind: "cron", cron: "0 3 * * *", window_start: "08:00", window_end: "22:00" });
@@ -164,7 +176,7 @@ test("global pause moves an automatic next run to the first allowed slot", () =>
       timezone: "America/Sao_Paulo",
       pause: { enabled: true, start: "22:00", end: "08:00", allow_manual_runs: true }
     };
-    const scheduler = new Scheduler(store, { tickMs: 0, getConfig: () => config });
+    const scheduler = new Scheduler(store, { tickMs: 0, getConfig: () => config, profileGate: openGate });
     scheduler.refreshNextRun("jobs", new Date("2026-08-05T05:00:00Z"));
     assert.equal(store.getSchedule("jobs").next_run_at, "2026-08-05T12:00:00.000Z");
   } finally {
@@ -180,9 +192,61 @@ test("manual queueing obeys the pause preference before creating a run", () => {
       timezone: "America/Sao_Paulo",
       pause: { enabled: true, start: "00:00", end: "23:59", allow_manual_runs: false }
     };
-    const scheduler = new Scheduler(store, { tickMs: 0, getConfig: () => config });
+    const scheduler = new Scheduler(store, { tickMs: 0, getConfig: () => config, profileGate: openGate });
     assert.throws(() => scheduler.enqueue("jobs", "force"), (error) => error.code === "pause_active");
     assert.equal(store.runningRun("jobs"), null);
+  } finally {
+    cleanup();
+  }
+});
+
+/* Profile gate: an unfilled profile disarms every pipeline. */
+
+test("an incomplete profile parks automatic schedules and refuses every trigger", async () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.updateSchedule("jobs", { mode: "auto", schedule_kind: "interval", interval_minutes: 20 });
+    const scheduler = new Scheduler(store, { tickMs: 0, profileGate: closedGate });
+
+    scheduler.refreshAllNextRuns(at(2026, 8, 5, 10, 0));
+    const parked = store.getSchedule("jobs");
+    assert.equal(parked.next_run_at, null, "nao pode anunciar proxima execucao");
+    assert.equal(parked.last_status, `blocked: ${PROFILE_GATE_CODE}`);
+
+    // The automatic trigger declines silently; explicit ones say why.
+    assert.equal(scheduler.enqueue("jobs", "auto"), null);
+    assert.throws(() => scheduler.enqueue("jobs", "force"), (error) => error.code === PROFILE_GATE_CODE);
+    assert.throws(
+      () => scheduler.enqueueCommand("jobs", "jobs:apply-one", ["job-1"], "manual"),
+      (error) => error.code === PROFILE_GATE_CODE
+    );
+
+    // A tick must not queue or spawn anything either.
+    await scheduler.tick();
+    assert.equal(store.runningRun("jobs"), null);
+    assert.equal(scheduler.status().queued.length, 0);
+  } finally {
+    cleanup();
+  }
+});
+
+test("completing the profile re-arms the schedule that was parked", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.updateSchedule("jobs", { mode: "auto", schedule_kind: "interval", interval_minutes: 20 });
+
+    let ready = false;
+    const scheduler = new Scheduler(store, { tickMs: 0, profileGate: () => (ready ? openGate() : closedGate()) });
+
+    scheduler.refreshNextRun("jobs", at(2026, 8, 5, 10, 0));
+    assert.equal(store.getSchedule("jobs").next_run_at, null);
+
+    ready = true;
+    scheduler.refreshNextRun("jobs", at(2026, 8, 5, 10, 0));
+
+    const armed = store.getSchedule("jobs");
+    assert.ok(armed.next_run_at, "a proxima execucao volta assim que o perfil fica completo");
+    assert.equal(armed.last_status, null, "o bloqueio antigo nao pode ficar preso");
   } finally {
     cleanup();
   }

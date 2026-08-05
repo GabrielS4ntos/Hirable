@@ -39,6 +39,43 @@ const ptBR = {
   "error.pause_interval_empty": "O início e o fim da pausa precisam ser diferentes.",
   "error.rate_limited": "Muitas solicitações. Tente novamente em instantes.",
   "error.request_failed": "Não foi possível concluir a solicitação.",
+  "error.profile_incomplete": "Preencha e salve o perfil antes de ativar ou executar pipelines.",
+  "error.autofix_blocked_command": "A sandbox recusou esse comando.",
+  "error.autofix_outside_workdir": "A sandbox executa apenas dentro da pasta do repositório.",
+  "alerts.title": "Alertas e auto-fix",
+  "alerts.description": "Controla com que frequência uma falha vira e-mail e o que tenta corrigi-la.",
+  "alerts.window": "Intervalo entre avisos iguais (minutos)",
+  "alerts.windowHelp": "Uma falha idêntica dentro desse intervalo é contada, mas não vira um novo e-mail. A contagem acompanha o próximo aviso enviado.",
+  "alerts.minutes": "{count} min",
+  "alerts.everyOne": "Todos",
+  "alerts.autoFix": "Tentar corrigir automaticamente",
+  "alerts.autoFixHelp": "Além do e-mail, a falha é enviada a um agente de CLI que tenta corrigir, roda os testes e reinicia o serviço sozinho.",
+  "alerts.autoFixBlocked": "Ative um agente de CLI abaixo para liberar o auto-fix.",
+  "alerts.sandboxNote": "O agente roda com um PATH restrito: só existem comandos de leitura, os scripts do projeto e o reinício. Git, rede e instalação não existem para ele, e as alterações ficam no diretório para você revisar.",
+  "alerts.recent": "Falhas agrupadas",
+  "alerts.occurrences": "{count}x",
+  "alerts.emails": "{count} e-mail(s)",
+  "alerts.suppressedTotal": "{count} aviso(s) evitado(s)",
+  "alerts.refused": "Ajuste recusado",
+  "alerts.saveError": "Não foi possível salvar",
+  "cliAgent.test": "Testar",
+  "cliAgent.command": "Comando",
+  "cliAgent.commandDescription": "Como este agente é chamado. O prompt entra no lugar de {prompt} e nunca passa por um shell.",
+  "cliAgent.executable": "Executável",
+  "cliAgent.executableHelp": "Somente o nome do binário, sem caminho — ele é procurado no PATH.",
+  "cliAgent.arguments": "Argumentos",
+  "cliAgent.argumentsHelp": "Lista JSON ou linha simples. Precisa conter {prompt} ou {file}.",
+  "cliAgent.docs": "Documentação",
+  "cliAgent.available": "Disponível · {detail}",
+  "cliAgent.installHint": "Não testado ainda. Instalação: {hint}",
+  "cliAgent.lastRun": "Última execução: {status} · {count} no total",
+  "cliAgent.saved": "Agente salvo",
+  "cliAgent.saveError": "Não foi possível salvar o agente",
+  "gate.title": "Perfil incompleto",
+  "gate.description": "Os agentes usam o perfil como única fonte confiável de dados sobre você. Enquanto ele não estiver completo, nenhum pipeline pode ser ativado nem executado.",
+  "gate.missing": "Faltam {count} campo(s) obrigatório(s).",
+  "gate.cta": "Completar perfil",
+  "gate.blockedBadge": "Bloqueado pelo perfil",
   "pause.group": "Pausa global",
   "pause.groupDescription": "Impede que novos pipelines comecem no intervalo configurado.",
   "pause.title": "Horário de pausa",
@@ -190,6 +227,33 @@ const ptBR = {
   "profile.finish": "Concluir",
   "profile.saveChanges": "Salvar alterações",
   "profile.unsaved": "Há alterações não salvas."
+  ,"profile.providerTitle": "Provider de modelo"
+  ,"profile.providerDescription": "Onde os agentes rodam. O primeiro configurado vira o principal; o segundo vira o fallback automático quando o principal atinge a cota."
+  ,"profile.providerRequired": "Preencher precisa de um provider de modelo. Configure um acima para liberar o botão."
+  ,"provider.primary": "Principal"
+  ,"provider.fallback": "Fallback"
+  ,"provider.none": "Sem função"
+  ,"provider.activeKeys": "{count} chave(s) ativa(s)"
+  ,"provider.rotation": " · rodízio"
+  ,"provider.noKey": "Ainda sem chave."
+  ,"provider.getKey": "Obter uma"
+  ,"provider.addKey": "Adicionar chave"
+  ,"provider.configure": "Configurar"
+  ,"provider.makePrimary": "Tornar principal"
+  ,"provider.useFallback": "Usar como fallback"
+  ,"provider.roleError": "Não foi possível mudar o papel"
+  ,"provider.secretDescription": "A chave fica no banco local com permissão 600 e nunca é devolvida para a interface."
+  ,"provider.whereKey": "Onde consigo a chave"
+  ,"provider.apiKey": "Chave de API"
+  ,"provider.nickname": "Apelido"
+  ,"provider.multipleKeys": "Este provider aceita várias chaves e as usa em rodízio para ampliar a cota."
+  ,"provider.model": "Modelo"
+  ,"provider.otherModel": "Outro modelo…"
+  ,"provider.modelPlaceholder": "identificador exato do modelo"
+  ,"provider.useAsPrimary": "Usar como provider principal"
+  ,"provider.primaryDescription": "Todas as chamadas vão para ele. Com apenas dois configurados, o provider principal anterior vira fallback."
+  ,"provider.configured": "{provider} configurado"
+  ,"provider.saveError": "Não foi possível salvar"
   ,"resume.tooLarge": "{name} passa de 10 MB",
   "resume.uploaded": "{name} enviado",
   "resume.reading": "Lendo o conteúdo para descobrir a que vagas ele serve.",
@@ -253,6 +317,43 @@ const en: Record<MessageKey, string> = {
   "error.pause_interval_empty": "Pause start and end must be different.",
   "error.rate_limited": "Too many requests. Try again shortly.",
   "error.request_failed": "The request could not be completed.",
+  "error.profile_incomplete": "Fill in and save your profile before enabling or running pipelines.",
+  "error.autofix_blocked_command": "The sandbox refused that command.",
+  "error.autofix_outside_workdir": "The sandbox only runs inside the repository folder.",
+  "alerts.title": "Alerts and auto-fix",
+  "alerts.description": "Controls how often a failure becomes an email, and what tries to repair it.",
+  "alerts.window": "Silence window for an identical alert (minutes)",
+  "alerts.windowHelp": "An identical failure inside this window is counted but does not become another email. The count rides along on the next alert that is sent.",
+  "alerts.minutes": "{count} min",
+  "alerts.everyOne": "Every one",
+  "alerts.autoFix": "Try to fix automatically",
+  "alerts.autoFixBlocked": "Enable a CLI agent below to unlock auto-fix.",
+  "alerts.autoFixHelp": "Besides the email, the failure is handed to a CLI agent that attempts a fix, runs the tests and restarts the service itself.",
+  "alerts.sandboxNote": "The agent runs with a restricted PATH: only read-only commands, the project scripts and the restart exist. Git, network and installs do not exist for it, and changes are left in the working tree for you to review.",
+  "alerts.recent": "Grouped failures",
+  "alerts.occurrences": "{count}x",
+  "alerts.emails": "{count} email(s)",
+  "alerts.suppressedTotal": "{count} alert(s) avoided",
+  "alerts.refused": "Change refused",
+  "alerts.saveError": "Could not save",
+  "cliAgent.test": "Test",
+  "cliAgent.command": "Command",
+  "cliAgent.commandDescription": "How this agent is invoked. The prompt replaces {prompt} and never goes through a shell.",
+  "cliAgent.executable": "Executable",
+  "cliAgent.executableHelp": "Binary name only, no path — it is looked up in PATH.",
+  "cliAgent.arguments": "Arguments",
+  "cliAgent.argumentsHelp": "JSON list or plain line. Must contain {prompt} or {file}.",
+  "cliAgent.docs": "Docs",
+  "cliAgent.available": "Available · {detail}",
+  "cliAgent.installHint": "Not tested yet. Install with: {hint}",
+  "cliAgent.lastRun": "Last run: {status} · {count} total",
+  "cliAgent.saved": "Agent saved",
+  "cliAgent.saveError": "Could not save the agent",
+  "gate.title": "Profile incomplete",
+  "gate.description": "The agents treat your profile as their only trusted source of facts about you. Until it is complete, no pipeline can be enabled or run.",
+  "gate.missing": "{count} required field(s) still missing.",
+  "gate.cta": "Complete profile",
+  "gate.blockedBadge": "Blocked by profile",
   "pause.group": "Global pause",
   "pause.groupDescription": "Prevents new pipelines from starting during the configured interval.",
   "pause.title": "Pause schedule",
@@ -404,6 +505,33 @@ const en: Record<MessageKey, string> = {
   "profile.finish": "Finish",
   "profile.saveChanges": "Save changes",
   "profile.unsaved": "There are unsaved changes."
+  ,"profile.providerTitle": "Model provider"
+  ,"profile.providerDescription": "Where agents run. The first configured provider becomes primary; the second becomes the automatic fallback when the primary reaches its quota."
+  ,"profile.providerRequired": "Fill in requires a model provider. Configure one above to enable the button."
+  ,"provider.primary": "Primary"
+  ,"provider.fallback": "Fallback"
+  ,"provider.none": "No role"
+  ,"provider.activeKeys": "{count} active key(s)"
+  ,"provider.rotation": " · round-robin"
+  ,"provider.noKey": "No key configured yet."
+  ,"provider.getKey": "Get one"
+  ,"provider.addKey": "Add key"
+  ,"provider.configure": "Configure"
+  ,"provider.makePrimary": "Make primary"
+  ,"provider.useFallback": "Use as fallback"
+  ,"provider.roleError": "Could not change the role"
+  ,"provider.secretDescription": "The key stays in the local database with 600 permissions and is never returned to the interface."
+  ,"provider.whereKey": "Where to get a key"
+  ,"provider.apiKey": "API key"
+  ,"provider.nickname": "Nickname"
+  ,"provider.multipleKeys": "This provider accepts multiple keys and rotates through them to extend the quota."
+  ,"provider.model": "Model"
+  ,"provider.otherModel": "Other model…"
+  ,"provider.modelPlaceholder": "exact model identifier"
+  ,"provider.useAsPrimary": "Use as primary provider"
+  ,"provider.primaryDescription": "All calls go to it. With only two configured providers, the previous primary becomes the fallback."
+  ,"provider.configured": "{provider} configured"
+  ,"provider.saveError": "Could not save"
   ,"resume.tooLarge": "{name} is larger than 10 MB",
   "resume.uploaded": "{name} uploaded",
   "resume.reading": "Reading the content to determine which jobs it fits.",
@@ -499,6 +627,48 @@ export function configFieldLabel(path: string, fallback: string, locale: AppLoca
     timezone: ["Fuso horário", "Time zone"]
   };
   return labels[path]?.[locale === "en" ? 1 : 0] ?? (locale === "pt-BR" ? fallback : path.replaceAll("_", " "));
+}
+
+const PROFILE_METADATA_EN: Record<string, string> = {
+  "section.identity.label": "Identity and contact",
+  "section.identity.description": "Used to fill the fixed fields in Easy Apply forms.",
+  "section.professional.label": "Professional profile",
+  "section.professional.description": "Basis for evaluating job fit.",
+  "section.work_eligibility.label": "Availability and eligibility",
+  "section.work_eligibility.description": "Defines which jobs the agent may apply to.",
+  "section.demographics.label": "Sensitive information and affirmative-action jobs",
+  "section.demographics.description": "Only provide what you consent to declare. Without this information, the agent does not apply to restricted jobs and chooses ‘prefer not to answer’ in forms.",
+  "section.skills.label": "Years by technology",
+  "section.skills.description": "Directly answers Easy Apply questions about years of experience with a technology.",
+  "section.recent_experiences.label": "Recent experience",
+  "section.education.label": "Education",
+  "field.full_name": "Full name", "hint.full_name": "As shown on your résumé.",
+  "field.name_aliases": "Other names used", "hint.name_aliases": "LinkedIn display name or professional nickname.",
+  "field.email": "Email", "field.phone_country": "Phone country code", "hint.phone_country": "Exactly as LinkedIn displays it, e.g. Brazil (+55).",
+  "field.phone_number_digits": "Phone number (digits only)", "field.city": "City", "field.country": "Country", "field.postal_code": "Postal code", "field.linkedin_url": "LinkedIn URL",
+  "field.headline": "Professional title", "hint.headline": "E.g. AI Software Engineer | Full Stack Developer.",
+  "field.target_roles": "Target roles", "field.total_software_engineering_years": "Total years of experience", "field.seniority": "Seniority", "field.english_level": "English level",
+  "field.other_languages": "Other languages", "hint.other_languages": "E.g. Spanish - B1.", "field.expected_salary_usd_gross_monthly": "Expected monthly salary (gross USD)",
+  "field.expected_salary_brl_monthly": "Expected monthly salary (BRL)", "field.recent_core_technologies": "Core technologies", "field.facts": "Verifiable facts",
+  "hint.facts": "Short statements agents may use in replies and forms.", "field.work_authorization_countries": "Countries where you may legally work",
+  "field.requires_visa_sponsorship": "Requires visa sponsorship", "field.willing_to_relocate": "Willing to relocate", "field.remote_only": "Remote jobs only",
+  "field.notice_period_days": "Notice period (days)", "field.available_from": "Available from", "hint.available_from": "A date or short text, e.g. immediately.",
+  "field.has_disability": "Person with a disability", "hint.has_disability": "Leave blank to never declare it.", "field.disability_details": "Type of disability",
+  "hint.disability_details": "Optional. Used only if you declare a disability.", "field.is_veteran": "Armed forces veteran", "field.gender": "Gender",
+  "field.gender_identity": "Gender identity", "field.race_ethnicity": "Race / ethnicity", "field.sexual_orientation": "Sexual orientation",
+  "field.years_by_technology": "Years by technology", "hint.years_by_technology": "E.g. TypeScript = 5.", "field.recent_experiences": "Experience", "field.education": "Education",
+  "subfield.company": "Company", "subfield.role": "Role", "subfield.start": "Start (YYYY-MM)", "subfield.end": "End (YYYY-MM or blank)",
+  "subfield.technologies": "Technologies", "subfield.degree": "Degree", "subfield.field": "Field of study", "subfield.institution": "Institution", "subfield.end.education": "Completion",
+  "option.native": "Native", "option.Física": "Physical", "option.Auditiva": "Hearing", "option.Visual": "Visual", "option.Intelectual": "Intellectual",
+  "option.Múltipla": "Multiple", "option.Reabilitado do INSS": "INSS rehabilitated worker", "option.Mulher": "Woman", "option.Homem": "Man",
+  "option.Não-binário": "Non-binary", "option.Cisgênero": "Cisgender", "option.Transgênero": "Transgender", "option.Branca": "White",
+  "option.Preta": "Black", "option.Parda": "Brown / mixed", "option.Amarela": "Asian", "option.Indígena": "Indigenous",
+  "option.Heterossexual": "Heterosexual", "option.Homossexual": "Homosexual", "option.Bissexual": "Bisexual", "option.Assexual": "Asexual"
+};
+
+export function profileMetadata(kind: "section" | "field" | "hint" | "subfield" | "option", key: string, fallback: string, locale: AppLocale, context?: string) {
+  if (locale !== "en") return fallback;
+  return PROFILE_METADATA_EN[`${kind}.${key}${context ? `.${context}` : ""}`] ?? PROFILE_METADATA_EN[`${kind}.${key}`] ?? fallback;
 }
 
 export const dictionaries = { "pt-BR": ptBR, en } as const;
