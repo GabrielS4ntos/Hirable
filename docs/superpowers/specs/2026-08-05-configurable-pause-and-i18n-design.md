@@ -137,7 +137,7 @@ The language is a browser preference, not an automation preference, so it remain
 - Pause starts or is changed after enqueue but before spawn: cancel the queued item using `pause_active_before_start`; never leave a queued row stuck.
 - Manual run blocked during pause: return 409 before creating a `pipeline_runs` row.
 - Missing translation key in development/test: fail loudly; production falls back to Portuguese key content and records the missing key in the console.
-- Corrupt saved locale: ignore it and resolve from browser/default.
+- Corrupt saved locale: ignore it and resolve directly to `pt-BR`.
 - Unknown backend error in English: show a localized generic message and stable code, never untranslated backend prose.
 
 ## Testing and verification
