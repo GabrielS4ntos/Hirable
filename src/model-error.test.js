@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { describeModelError, isInvalidKeyError, isKeyScopedModelError, isQuotaError, modelErrorText } from "./model-error.js";
+import {
+  describeModelError,
+  isContextOverflowError,
+  isInvalidKeyError,
+  isKeyScopedModelError,
+  isQuotaError,
+  modelErrorText
+} from "./model-error.js";
 
 const GEMINI_INVALID = new Error(
   '{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT"}}'
@@ -45,6 +52,30 @@ test("the message names the provider, the key and where to fix it", () => {
   assert.match(text, /Chaves de API/);
   // The provider's JSON must not reach the interface.
   assert.ok(!text.includes("INVALID_ARGUMENT"));
+});
+
+test("an oversized prompt is recognised across provider wordings", () => {
+  for (const message of [
+    "This model's maximum context length is 8192 tokens, however you requested 21000",
+    "The input token count exceeds the maximum number of tokens allowed",
+    "prompt is too long: 250000 tokens > 200000 maximum",
+    "Please reduce the length of the messages",
+    "context_length_exceeded"
+  ]) {
+    assert.equal(isContextOverflowError(new Error(message)), true, message);
+  }
+  assert.equal(isContextOverflowError(new Error("429 Too Many Requests")), false);
+  assert.equal(isContextOverflowError(GEMINI_INVALID), false);
+});
+
+test("an oversized prompt never rotates keys, however much it sounds like a quota", () => {
+  // "too many tokens" reads like a rate limit to `isQuotaError`; if that won,
+  // every key would be spent replaying the same failure, and the user would be
+  // told to check a quota instead of shortening the input.
+  const overflow = new Error("Too many tokens: the prompt is too long for this model");
+  assert.equal(isQuotaError(overflow), true, "precondition: the wordings really do overlap");
+  assert.equal(isKeyScopedModelError(overflow), false);
+  assert.match(describeModelError(overflow, { provider: "Gemini" }), /janela de contexto/);
 });
 
 test("an unknown failure still says something, and stays short", () => {

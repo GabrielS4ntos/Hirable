@@ -19,6 +19,8 @@ import { PROFILE_GATE_CODE, profileGateState, resetProfileGateCache } from "../p
 import { assertLaunchAllowed, sandboxEnv } from "../auto-fix-sandbox.js";
 import { detectSupervisor } from "../service-restart.js";
 import { RESUME_GATE_CODE, evaluateResumeGate } from "../resume-gate.js";
+import { createTaskQueue } from "../task-queue.js";
+import { isContextOverflowError } from "../model-error.js";
 import { extractionChanged, hashResumeFile, hashResumeText } from "../extraction-source.js";
 import { LINKEDIN_GATE_CODE, evaluateLinkedInGate } from "../linkedin-gate.js";
 
@@ -221,26 +223,52 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
   route("POST", /^\/api\/profile\/extract$/, async (req) => {
     const body = await readBody(req, 4_000_000);
 
-    // Two sources, one agent: pasted text, or an uploaded file read here so the
-    // document never has to make a round trip through the browser.
+    // Two sources, one agent: pasted text, or uploaded files read here so the
+    // documents never have to make a round trip through the browser.
     let resumeText = String(body.resume_text || "").trim();
-    let marker = { source: "text", hash: hashResumeText(resumeText), resume_id: null };
+    let marker = { source: "text", hash: hashResumeText(resumeText), resume_id: null, resume_ids: [] };
 
-    if (body.resume_id) {
-      const resume = store.getResume(String(body.resume_id));
-      if (!resume) throw new HttpError(404, "currículo não encontrado");
+    // `resume_id` is the single-file shape the form used before; both are read
+    // the same way so an older client keeps working.
+    const requestedIds = (Array.isArray(body.resume_ids) ? body.resume_ids : [body.resume_id])
+      .map((id) => String(id || "").trim())
+      .filter(Boolean);
 
-      const content = await fsp.readFile(path.join(resumesDir(), resume.stored_name)).catch(() => null);
-      if (!content) throw new HttpError(410, "o arquivo não está mais no disco");
+    if (requestedIds.length) {
+      const parts = [];
+      const contents = [];
+      const usedIds = [];
 
-      const extracted = extractDocumentText(content, resume.original_name);
-      if (!extracted.extracted) {
-        // A PDF is stored and attached fine, but its text cannot be read without
-        // a dependency this project does not carry — say so instead of guessing.
-        throw new HttpError(422, extracted.reason, "resume_not_readable");
+      for (const id of requestedIds) {
+        const resume = store.getResume(id);
+        if (!resume) throw new HttpError(404, `currículo não encontrado: ${id}`);
+
+        const content = await fsp.readFile(path.join(resumesDir(), resume.stored_name)).catch(() => null);
+        if (!content) throw new HttpError(410, `o arquivo não está mais no disco: ${resume.label}`);
+
+        const extracted = extractDocumentText(content, resume.original_name);
+        if (!extracted.extracted) {
+          // A PDF is stored and attached fine, but its text cannot be read without
+          // a dependency this project does not carry — say so instead of guessing.
+          throw new HttpError(422, `${resume.label}: ${extracted.reason}`, "resume_not_readable");
+        }
+
+        const text = String(extracted.text || "").trim();
+        if (!text) continue;
+        // Each document is labelled so the agent reads them as separate résumés
+        // of one person, not as a single document that contradicts itself.
+        parts.push(requestedIds.length > 1 ? `### Currículo: ${resume.label}\n\n${text}` : text);
+        contents.push(content);
+        usedIds.push(resume.id);
       }
-      resumeText = String(extracted.text || "").trim();
-      marker = { source: "file", hash: hashResumeFile(content), resume_id: resume.id };
+
+      resumeText = parts.join("\n\n---\n\n");
+      marker = {
+        source: "file",
+        hash: hashResumeFile(Buffer.concat(contents)),
+        resume_id: usedIds[0] ?? null,
+        resume_ids: usedIds
+      };
     }
 
     if (resumeText.length < 40) throw new HttpError(400, "Cole o texto do currículo antes de preencher");
@@ -251,7 +279,11 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
     }
 
     try {
-      const result = await runCliJson("profile:extract", [], { input: resumeText, timeoutMs: 120_000 });
+      const documents = Math.max(1, marker.resume_ids.length);
+      const result = await runCliJson("profile:extract", ["--documents", String(documents)], {
+        input: resumeText,
+        timeoutMs: 120_000
+      });
       const profile = normalizeProfile(result?.profile || {});
       // Recorded only on success: a failed run must not disable the button that
       // would let the user try again.
@@ -268,6 +300,17 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
         rate_limit: { remaining: limit.remaining }
       };
     } catch (error) {
+      // Concatenating several résumés is the one thing here that can outgrow the
+      // model, and neither retrying nor another key helps — the user has to pick
+      // a roomier model or send fewer documents, so say exactly that.
+      if (isContextOverflowError(error)) {
+        throw new HttpError(
+          413,
+          "Os currículos somados passam da janela de contexto do modelo. Escolha um modelo com janela maior em Configurações, ou remova alguns currículos antes de preencher.",
+          "context_overflow",
+          { resume_count: marker.resume_ids.length, characters: resumeText.length }
+        );
+      }
       throw new HttpError(502, `Falha ao analisar o currículo: ${error.message}`);
     }
   });
@@ -427,6 +470,10 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
 
   const resumesDir = () => path.resolve(ROOT, path.dirname(bootstrapDatabasePath()), "resumes");
 
+  // Indexing is fire-and-forget, so nothing upstream throttles it: dropping ten
+  // files in would start ten subprocesses and ten provider calls at once.
+  const indexQueue = createTaskQueue({ limit: 2 });
+
   route("GET", /^\/api\/resumes$/, () => ({ items: store.listResumes() }));
 
   /**
@@ -462,7 +509,8 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
     if (!extracted.extracted) {
       store.setResumeIndex(id, { error: extracted.reason });
     } else {
-      runCliJson("resume:index", [id], { input: extracted.text, timeoutMs: 120_000 })
+      indexQueue
+        .run(() => runCliJson("resume:index", [id], { input: extracted.text, timeoutMs: 120_000 }))
         .catch(() => {
           // The CLI already wrote a readable reason before it exited. Only fill
           // one in when it did not get that far — otherwise this overwrites the

@@ -33,16 +33,16 @@ function formatSize(bytes: number) {
  * Where the profile extraction reads from, during onboarding.
  *
  * The two ways of providing a résumé are alternatives, not a list to fill in
- * twice, so only one is on screen at a time. Exactly one file is kept here: a
- * second one would raise a question this screen has no reason to ask — which of
- * them describes you — and the profile screen is where a library belongs.
+ * twice, so only one is on screen at a time. Several files are allowed: people
+ * keep one résumé per role, and reading them together describes them better
+ * than picking one. Filling merges them — the agent drops what repeats.
  */
 export function ResumeSourcePicker({
   source,
   onSourceChange,
   resumeText,
   onResumeTextChange,
-  resume,
+  resumes,
   onResumeChange,
   minChars
 }: {
@@ -50,7 +50,7 @@ export function ResumeSourcePicker({
   onSourceChange: (source: ResumeSource) => void;
   resumeText: string;
   onResumeTextChange: (text: string) => void;
-  resume: ResumeDocument | null;
+  resumes: ResumeDocument[];
   onResumeChange: (resumes: ResumeDocument[]) => void;
   minChars: number;
 }) {
@@ -58,51 +58,66 @@ export function ResumeSourcePicker({
   const { t, locale } = useI18n();
   const inputRef = React.useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = React.useState(false);
-  const [removing, setRemoving] = React.useState(false);
+  const [removingId, setRemovingId] = React.useState<string | null>(null);
   const [dragging, setDragging] = React.useState(false);
 
+  /**
+   * Uploads run one after another on purpose: every response carries the whole
+   * list, so firing them together lets the last one to land overwrite the
+   * others and files disappear from the screen while existing in the database.
+   */
   async function upload(files: FileList | File[] | null) {
-    const file = Array.from(files || [])[0];
-    if (!file) return;
-    if (file.size > MAX_BYTES) {
+    const picked = Array.from(files || []);
+    if (!picked.length) return;
+
+    for (const file of picked.filter((item) => item.size > MAX_BYTES)) {
       toast({ title: t("resume.tooLarge", { name: file.name }), variant: "error" });
-      return;
     }
+    const accepted = picked.filter((file) => file.size <= MAX_BYTES);
+    if (!accepted.length) return;
 
     setUploading(true);
     try {
-      const result = await api.uploadResume({
-        filename: file.name,
-        label: file.name.replace(/\.[^.]+$/, ""),
-        mime_type: file.type,
-        content_base64: await readAsBase64(file)
-      });
-      onResumeChange(result.items);
-      toast({
-        title: t("resume.uploaded", { name: file.name }),
-        description: result.extraction.extracted
-          ? t("resume.reading")
-          : t("resume.savedWithoutReading", { reason: result.extraction.reason }),
-        variant: result.extraction.extracted ? "success" : "default"
-      });
-    } catch (error) {
-      toast({ title: t("resume.uploadFailed"), description: localizedError(error, t, locale), variant: "error" });
+      for (const file of accepted) {
+        try {
+          const result = await api.uploadResume({
+            filename: file.name,
+            label: file.name.replace(/\.[^.]+$/, ""),
+            mime_type: file.type,
+            content_base64: await readAsBase64(file)
+          });
+          onResumeChange(result.items);
+          toast({
+            title: t("resume.uploaded", { name: file.name }),
+            description: result.extraction.extracted
+              ? t("resume.reading")
+              : t("resume.savedWithoutReading", { reason: result.extraction.reason }),
+            variant: result.extraction.extracted ? "success" : "default"
+          });
+        } catch (error) {
+          // One rejected file must not cancel the rest of the selection.
+          toast({
+            title: t("resume.uploadFailed"),
+            description: `${file.name}: ${localizedError(error, t, locale)}`,
+            variant: "error"
+          });
+        }
+      }
     } finally {
       setUploading(false);
       if (inputRef.current) inputRef.current.value = "";
     }
   }
 
-  async function remove() {
-    if (!resume) return;
-    setRemoving(true);
+  async function remove(id: string) {
+    setRemovingId(id);
     try {
-      onResumeChange((await api.deleteResume(resume.id)).items);
+      onResumeChange((await api.deleteResume(id)).items);
       toast({ title: t("resume.removed"), variant: "success" });
     } catch (error) {
       toast({ title: t("common.error"), description: localizedError(error, t, locale), variant: "error" });
     } finally {
-      setRemoving(false);
+      setRemovingId(null);
     }
   }
 
@@ -142,36 +157,68 @@ export function ResumeSourcePicker({
             {resumeText.trim().length >= minChars ? "" : t("profile.minimum", { count: minChars })}
           </p>
         </div>
-      ) : resume ? (
-        <div className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border p-3">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <FileText className="size-4 shrink-0 text-muted-foreground" />
-              <span className="text-sm font-medium">{resume.label}</span>
-              {resume.indexed ? (
-                <Badge variant="success" className="gap-1">
-                  <CheckCircle2 className="size-3" />
-                  {t("resume.analyzed")}
-                </Badge>
-              ) : resume.index_error ? (
-                <Badge variant="secondary">{t("resume.noAnalysis")}</Badge>
-              ) : (
-                <Badge variant="secondary" className="gap-1">
-                  <Loader2 className="size-3 animate-spin" />
-                  {t("resume.analyzing")}
-                </Badge>
-              )}
+      ) : resumes.length ? (
+        <div className="space-y-2">
+          {resumes.map((resume) => (
+            <div
+              key={resume.id}
+              className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border p-3"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <FileText className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="text-sm font-medium">{resume.label}</span>
+                  {resume.indexed ? (
+                    <Badge variant="success" className="gap-1">
+                      <CheckCircle2 className="size-3" />
+                      {t("resume.analyzed")}
+                    </Badge>
+                  ) : resume.index_error ? (
+                    <Badge variant="secondary">{t("resume.noAnalysis")}</Badge>
+                  ) : (
+                    <Badge variant="secondary" className="gap-1">
+                      <Loader2 className="size-3 animate-spin" />
+                      {t("resume.analyzing")}
+                    </Badge>
+                  )}
+                </div>
+                <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
+                  {resume.original_name} · {formatSize(resume.size_bytes)}
+                </p>
+                {resume.index_error ? (
+                  <p className="mt-1 text-xs text-muted-foreground">{resume.index_error}</p>
+                ) : null}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => remove(resume.id)}
+                disabled={removingId !== null}
+              >
+                {removingId === resume.id ? <Loader2 className="animate-spin" /> : <Trash2 />}
+                {resumes.length > 1 ? t("resume.removeFile") : t("resume.replaceFile")}
+              </Button>
             </div>
-            <p className="mt-1 truncate font-mono text-xs text-muted-foreground">
-              {resume.original_name} · {formatSize(resume.size_bytes)}
-            </p>
-            {resume.index_error ? <p className="mt-1 text-xs text-muted-foreground">{resume.index_error}</p> : null}
-            <p className="mt-2 text-xs text-muted-foreground">{t("resume.singleFileHelp")}</p>
+          ))}
+
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <Button variant="outline" size="sm" onClick={() => inputRef.current?.click()} disabled={uploading}>
+              {uploading ? <Loader2 className="animate-spin" /> : <Upload />}
+              {t("resume.addAnother")}
+            </Button>
+            <input
+              ref={inputRef}
+              type="file"
+              accept={ACCEPTED}
+              multiple
+              className="hidden"
+              onChange={(event) => void upload(event.target.files)}
+            />
           </div>
-          <Button variant="outline" size="sm" onClick={remove} disabled={removing}>
-            {removing ? <Loader2 className="animate-spin" /> : <Trash2 />}
-            {t("resume.replaceFile")}
-          </Button>
+
+          <p className="text-xs text-muted-foreground">
+            {resumes.length > 1 ? t("resume.multiFileHelp", { count: resumes.length }) : t("resume.singleFileHelp")}
+          </p>
         </div>
       ) : (
         <div
@@ -203,6 +250,7 @@ export function ResumeSourcePicker({
             ref={inputRef}
             type="file"
             accept={ACCEPTED}
+            multiple
             className="hidden"
             onChange={(event) => void upload(event.target.files)}
           />

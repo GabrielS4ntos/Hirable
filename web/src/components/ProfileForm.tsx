@@ -33,6 +33,11 @@ const DEMOGRAPHIC_KEYS: Record<string, Parameters<Translate>[0]> = {
  * fill the fields, edit whatever is wrong, then save. Filling never writes —
  * only Salvar does.
  */
+/** Same résumés, regardless of the order the list came back in. */
+function sameIds(a: string[], b: string[]) {
+  return a.length === b.length && [...a].sort().join("|") === [...b].sort().join("|");
+}
+
 export function ProfileForm({ mode, onSaved }: { mode: "onboarding" | "profile"; onSaved?: () => void }) {
   const toast = useToast();
   const { t, locale } = useI18n();
@@ -77,24 +82,29 @@ export function ProfileForm({ mode, onSaved }: { mode: "onboarding" | "profile";
   const isOnboarding = mode === "onboarding";
   const dirty = baseline !== "" && JSON.stringify({ profile, resume_text: resumeText }) !== baseline;
 
-  // Onboarding keeps exactly one file, so it is always the one to read from.
-  const onboardingResume = resumes[0] ?? null;
+  // Every uploaded file is read: they are résumés of one person, and the agent
+  // merges them into a single profile rather than picking one.
+  const resumeIds = React.useMemo(() => resumes.map((item) => item.id), [resumes]);
   const lastExtraction = data?.last_extraction ?? null;
 
-  // Re-running over the same résumé costs a model call and returns the same
+  // Re-running over the same résumés costs a model call and returns the same
   // fields, so the button waits for the source to actually change.
-  const sourceReady = source === "text" ? resumeText.trim().length >= MIN_RESUME_CHARS : Boolean(onboardingResume);
+  const sourceReady = source === "text" ? resumeText.trim().length >= MIN_RESUME_CHARS : resumeIds.length > 0;
   const sourceChanged =
     source === "text"
       ? !lastExtraction || lastExtraction.hash !== textHash
-      : !lastExtraction || lastExtraction.source !== "file" || lastExtraction.resume_id !== onboardingResume?.id;
+      : !lastExtraction ||
+        lastExtraction.source !== "file" ||
+        // Adding or removing a file changes the answer, so compare the whole set
+        // and not just the first one.
+        !sameIds(lastExtraction.resume_ids ?? (lastExtraction.resume_id ? [lastExtraction.resume_id] : []), resumeIds);
   const canExtract = sourceReady && hasProvider && sourceChanged;
 
   async function fillFromResume() {
     setExtracting(true);
     try {
       const result = await api.extractProfile(
-        source === "file" && onboardingResume ? { resume_id: onboardingResume.id } : { resume_text: resumeText }
+        source === "file" && resumeIds.length ? { resume_ids: resumeIds } : { resume_text: resumeText }
       );
       // Fields are replaced in place: the user reviews and edits before saving.
       setProfile(result.profile);
@@ -209,7 +219,7 @@ export function ProfileForm({ mode, onSaved }: { mode: "onboarding" | "profile";
               onSourceChange={setSource}
               resumeText={resumeText}
               onResumeTextChange={setResumeText}
-              resume={onboardingResume}
+              resumes={resumes}
               onResumeChange={setResumes}
               minChars={MIN_RESUME_CHARS}
             />

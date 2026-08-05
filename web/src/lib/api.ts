@@ -135,7 +135,9 @@ export type DeclaredDemographics = {
 export type LastExtraction = {
   source: "text" | "file";
   hash: string;
+  /** First of `resume_ids`; kept for payloads written before multi-file fills. */
   resume_id: string | null;
+  resume_ids?: string[];
   at: string;
 };
 
@@ -389,8 +391,11 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(input)
     }),
-  /** Fills the profile from pasted text or from an uploaded file, never both. */
-  extractProfile: (source: { resume_text: string } | { resume_id: string }) =>
+  /**
+   * Fills the profile from pasted text or from uploaded files, never both.
+   * Several files are read as one person's résumés and merged by the agent.
+   */
+  extractProfile: (source: { resume_text: string } | { resume_ids: string[] }) =>
     request<{
       profile: Record<string, any>;
       resume_text?: string;

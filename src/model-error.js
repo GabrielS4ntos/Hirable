@@ -45,6 +45,19 @@ export function isInvalidKeyError(error) {
   );
 }
 
+/**
+ * The prompt was longer than the model can read.
+ *
+ * Unlike quota, this says nothing about the key — rotating keys or retrying
+ * replays the same failure. The only ways out are a roomier model or less
+ * input, so the caller has to tell the user rather than absorb it.
+ */
+export function isContextOverflowError(error) {
+  return /context[_ ]?length|context window|too many tokens|maximum context|token limit|prompt is too long|input is too long|exceeds the maximum|reduce the length|string too long/.test(
+    haystack(error)
+  );
+}
+
 /** Out of quota or being rate limited. Another key of the same provider may not be. */
 export function isQuotaError(error) {
   return /429|quota|rate limit|resource_exhausted|too many|exceeded/.test(haystack(error));
@@ -57,6 +70,10 @@ export function isQuotaError(error) {
  * that was used, not about what was asked. Everything else fails fast.
  */
 export function isKeyScopedModelError(error) {
+  // Checked first because the wordings overlap: "too many tokens" reads like a
+  // rate limit to `isQuotaError`, and rotating keys over an oversized prompt
+  // just spends every key on the same failure.
+  if (isContextOverflowError(error)) return false;
   return isQuotaError(error) || isInvalidKeyError(error);
 }
 
@@ -71,6 +88,11 @@ export function describeModelError(error, { provider = "", keyLabel = "" } = {})
     return where
       ? `Chave de API recusada (${where}). Verifique a chave em Chaves de API.`
       : "Chave de API recusada. Verifique a chave em Chaves de API.";
+  }
+  if (isContextOverflowError(error)) {
+    return where
+      ? `Texto maior que a janela de contexto do modelo (${where}).`
+      : "Texto maior que a janela de contexto do modelo.";
   }
   if (isQuotaError(error)) {
     return where ? `Cota ou limite atingido (${where}).` : "Cota ou limite atingido.";
