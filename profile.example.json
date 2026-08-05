@@ -1,0 +1,51 @@
+{
+  "identity": {
+    "full_name": "Your Name",
+    "name_aliases": ["Your LinkedIn Display Name"],
+    "email": "you@example.com",
+    "phone_country": "Brazil (+55)",
+    "phone_number_digits": "5511999999999",
+    "city": "Sao Paulo",
+    "country": "Brazil",
+    "postal_code": "00000000"
+  },
+  "professional": {
+    "target_roles": ["Software Engineer"],
+    "total_software_engineering_years": 5,
+    "english_level": "B2",
+    "expected_salary_usd_gross_monthly": 4000,
+    "recent_core_technologies": ["TypeScript", "React", "Node.js"],
+    "facts": ["Describe only facts that may safely be used in job forms and recruiter replies."]
+  },
+  "recent_experience": [
+    {
+      "company": "Example Company",
+      "role": "Software Engineer",
+      "start": "2024-01",
+      "end": null,
+      "technologies": ["TypeScript", "React", "Node.js"]
+    }
+  ],
+  "education": [
+    {
+      "degree": "Bachelor of Science (B.S)",
+      "field": "Computer Science"
+    }
+  ],
+  "demographics": {
+    "race_ethnicity": "",
+    "gender": "",
+    "gender_identity": "",
+    "sexual_orientation": "",
+    "has_disability": null,
+    "is_veteran": null,
+    "option_keywords": {
+      "race_ethnicity": [],
+      "gender": [],
+      "gender_identity": [],
+      "sexual_orientation": [],
+      "has_disability": [],
+      "is_veteran": []
+    }
+  }
+}

@@ -1,0 +1,170 @@
+{
+  "version": 1,
+  "timezone": "America/Sao_Paulo",
+  "profile_path": "./profile.json",
+  "storage": {
+    "database_path": "./data/semantic-memory.sqlite",
+    "legacy_state_path": "./state.json"
+  },
+  "browser": {
+    "user_data_dir": "./.browser-profile",
+    "headless": true,
+    "slow_mo_ms": 0,
+    "navigation_timeout_ms": 45000
+  },
+  "linkedin": {
+    "messaging_url": "https://www.linkedin.com/messaging/",
+    "network_url": "https://www.linkedin.com/mynetwork/grow/",
+    "jobs_url": "https://www.linkedin.com/jobs/",
+    "login_url_pattern": "linkedin.com/login|checkpoint|uas/login"
+  },
+  "orchestrator": {
+    "lock_file": "./.run.lock",
+    "lock_ttl_ms": 900000,
+    "log_retention": { "max_file_bytes": 5242880, "keep_last_lines": 2000 },
+    "single_browser_context": true,
+    "max_tabs": 1,
+    "jitter_seconds": { "dm": 30, "network": 45, "jobs": 90 }
+  },
+  "alerts": {
+    "notify_on_error": true,
+    "macos_notification": true,
+    "title": "LinkedIn automation error",
+    "email_enabled": false,
+    "email_to": "you@example.com"
+  },
+  "gmail": {
+    "enabled": false,
+    "credentials_path": "./secrets/gmail-oauth-client.json",
+    "token_path": "./secrets/gmail-token.json",
+    "redirect_port": 45819,
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.send",
+      "https://www.googleapis.com/auth/calendar.events"
+    ],
+    "from": "you@example.com"
+  },
+  "calendar": {
+    "enabled": false,
+    "calendar_id": "primary",
+    "timezone": "America/Sao_Paulo",
+    "default_duration_minutes": 30,
+    "reminder_minutes": 30,
+    "allowed_hours": [
+      { "start": "10:00", "end": "12:00" },
+      { "start": "13:00", "end": "18:00" }
+    ],
+    "never_schedule_same_day": true
+  },
+  "dm_watcher": {
+    "read_only": true,
+    "max_threads_to_scan": 20,
+    "open_changed_threads": true,
+    "compact_text_limit": 240,
+    "new_message_triggers_agent": true,
+    "candidate_mode": "range_inbound",
+    "history_days": 15,
+    "max_history_messages": 30
+  },
+  "network_invites": {
+    "enabled": false,
+    "max_accepts_per_run": 20,
+    "accept_without_message": true
+  },
+  "jobs_watcher": {
+    "enabled": true,
+    "read_only": true,
+    "external_enabled": true,
+    "easy_apply_enabled": false,
+    "max_jobs_per_search": 25,
+    "max_searches_per_run": 3,
+    "max_scrolls_per_search": 12,
+    "stop_after_stale_scrolls": 3,
+    "max_minutes_per_search": 4,
+    "history_days": 1,
+    "max_easy_apply_per_run": 2,
+    "max_easy_apply_per_day": 20,
+    "max_easy_apply_per_week": 30,
+    "ai_form_filler_enabled": true,
+    "max_ai_form_fill_attempts": 3,
+    "max_easy_apply_steps": 12,
+    "semantic_memory": {
+      "enabled": true,
+      "database_path": "./data/semantic-memory.sqlite",
+      "embedding_model": "gemini-embedding-001",
+      "output_dimensions": 768,
+      "top_k": 3,
+      "auto_apply_similarity": 0.92,
+      "model_hint_similarity": 0.82,
+      "minimum_score_margin": 0.05,
+      "max_input_chars": 500,
+      "max_candidates_per_field": 3
+    },
+    "max_hot_alerts_per_run": 12,
+    "max_interview_processes_per_week": 8,
+    "selection_thresholds": {
+      "default_min_score": 70,
+      "auto_apply_min_score": 86,
+      "raise_threshold_when_matches_exceed": 25,
+      "raised_auto_apply_min_score": 92
+    },
+    "resume_display_names": {
+      "full_stack": "Full Stack Engineer Resume.pdf",
+      "ai_engineer": "AI Engineer Resume.pdf",
+      "software_engineer": "Software Engineer Resume.pdf"
+    },
+    "known_answers": [
+      { "pattern": "phone country code|country code", "value": "Brazil (+55)" },
+      { "pattern": "english", "value": "B2" }
+    ],
+    "blocked_question_patterns": [
+      "visa",
+      "sponsorship",
+      "work authorization",
+      "authorized to work",
+      "security clearance",
+      "start date",
+      "notice period",
+      "salary",
+      "compensation",
+      "\\brace\\b",
+      "ethnicity",
+      "gender",
+      "disability",
+      "veteran",
+      "date of birth",
+      "birth date",
+      "\\bage\\b",
+      "criminal",
+      "government id",
+      "passport",
+      "social security"
+    ],
+    "searches": [
+      {
+        "name": "software_engineer_easy_apply",
+        "url": "https://www.linkedin.com/jobs/search-results/?keywords=Software%20Engineer&f_TPR=r86400&f_AL=true"
+      }
+    ]
+  },
+  "model_gate": {
+    "enabled": true,
+    "provider": "gemini",
+    "api_keys_env": "GEMINI_API_KEYS",
+    "api_key_env": "GEMINI_API_KEY",
+    "writer_model": "gemini-3.5-flash-lite",
+    "validator_model": "gemini-3.5-flash-lite",
+    "job_model": "gemini-3.5-flash-lite",
+    "fallback_provider": "openrouter",
+    "openrouter_api_key_env": "OPENROUTER_API_KEY",
+    "openrouter_model": "google/gemini-3.5-flash-lite",
+    "max_output_tokens": 600
+  },
+  "security": {
+    "external_content_is_untrusted": true,
+    "never_use_private_apis": true,
+    "stop_on_captcha": true,
+    "stop_on_checkpoint": true,
+    "stop_on_logout": true
+  }
+}

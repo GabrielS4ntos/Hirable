@@ -1,0 +1,38 @@
+{
+  "name": "linkedin-local-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "scripts": {
+    "dm:check": "node src/cli.js dm:check",
+    "dm:check:headed": "LINKEDIN_HEADLESS=false node src/cli.js dm:check",
+    "dm:check:headless": "LINKEDIN_HEADLESS=true node src/cli.js dm:check",
+    "dm:debug": "LINKEDIN_HEADLESS=true node src/cli.js dm:debug",
+    "dm:extract": "LINKEDIN_HEADLESS=true node src/cli.js dm:extract",
+    "dm:mock": "node src/cli.js dm:mock",
+    "network:accept": "LINKEDIN_HEADLESS=true node src/cli.js network:accept",
+    "jobs:scan": "LINKEDIN_HEADLESS=true node src/cli.js jobs:scan",
+    "jobs:apply": "LINKEDIN_HEADLESS=true node src/cli.js jobs:apply",
+    "jobs:form-smoke": "LINKEDIN_HEADLESS=true LINKEDIN_STOP_BEFORE_SUBMIT=true node src/cli.js jobs:form-smoke",
+    "jobs:mock": "node src/cli.js jobs:mock",
+    "semantic:mock": "node src/semantic-memory.test.js",
+    "semantic:smoke": "node src/cli.js semantic:smoke",
+    "gmail:auth": "node src/cli.js gmail:auth",
+    "gmail:test": "node src/cli.js gmail:test",
+    "auth:status": "node src/cli.js auth:status",
+    "run:dm": "LINKEDIN_HEADLESS=true node src/cli.js run:dm",
+    "run:network": "LINKEDIN_HEADLESS=true node src/cli.js run:network",
+    "run:jobs": "LINKEDIN_HEADLESS=true node src/cli.js run:jobs",
+    "validate": "node src/cli.js validate",
+    "storage:status": "node src/cli.js storage:status"
+  },
+  "dependencies": {
+    "@google/genai": "^2.15.0",
+    "googleapis": "^174.0.0",
+    "openai": "^7.4.0",
+    "playwright": "^1.54.2"
+  }
+}

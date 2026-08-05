@@ -1,0 +1,14 @@
+node_modules/
+.browser-profile/
+logs/
+secrets/
+config.json
+profile.json
+state.json
+data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.run.lock
+.DS_Store
+launchd/*.plist
