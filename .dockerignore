@@ -1,0 +1,15 @@
+node_modules
+web/node_modules
+web/dist
+.browser-profile
+data
+logs
+secrets
+.git
+.github
+config.json
+profile.json
+state.json
+docs/screenshots
+*.sqlite*
+.DS_Store

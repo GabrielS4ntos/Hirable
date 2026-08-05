@@ -41,6 +41,12 @@ export function nextInboxPair(networkSchedule, dmSchedule, from = new Date(), of
   return { network: null, dm: null, error: "no complete future inbox pair" };
 }
 
+/** Keeps a real status, but never leaves a stale schedule_error behind. */
+function statusAfterResolve(schedule, error) {
+  if (error) return `schedule_error: ${error}`;
+  return String(schedule?.last_status || "").startsWith("schedule_error") ? null : schedule?.last_status;
+}
+
 /**
  * Runs pipelines according to the schedules stored in SQLite.
  *
@@ -96,14 +102,36 @@ export class Scheduler {
     }
   }
 
+  /**
+   * Network and DM run as a pair when both are on the same daily_times cycle, so
+   * invitations are accepted shortly before the inbox is read.
+   *
+   * Pairing is an optimization, not a requirement: any other valid combination
+   * (interval, cron, one of them manual) falls back to independent scheduling
+   * instead of being reported as a misconfiguration.
+   */
   refreshInboxPair(from = new Date()) {
     const network = this.store.getSchedule("network");
     const dm = this.store.getSchedule("dm");
     const pair = nextInboxPair(network, dm, from);
-    const lastStatus = pair.error ? `schedule_error: ${pair.error}` : undefined;
-    if (network) this.store.setScheduleRuntime("network", { next_run_at: pair.network, last_status: lastStatus ?? network.last_status });
-    if (dm) this.store.setScheduleRuntime("dm", { next_run_at: pair.dm, last_status: lastStatus ?? dm.last_status });
-    return pair;
+
+    if (!pair.error) {
+      if (network) this.store.setScheduleRuntime("network", { next_run_at: pair.network, last_status: statusAfterResolve(network, null) });
+      if (dm) this.store.setScheduleRuntime("dm", { next_run_at: pair.dm, last_status: statusAfterResolve(dm, null) });
+      return pair;
+    }
+
+    const resolved = { network: null, dm: null, error: null, paired: false };
+    for (const schedule of [network, dm]) {
+      if (!schedule) continue;
+      const { next_run_at, error } = nextRunForSchedule(schedule, from);
+      resolved[schedule.pipeline] = next_run_at;
+      this.store.setScheduleRuntime(schedule.pipeline, {
+        next_run_at,
+        last_status: statusAfterResolve(schedule, error)
+      });
+    }
+    return resolved;
   }
 
   refreshNextRun(pipeline, from = new Date()) {
@@ -113,7 +141,7 @@ export class Scheduler {
     const { next_run_at, error } = nextRunForSchedule(schedule, from);
     this.store.setScheduleRuntime(pipeline, {
       next_run_at,
-      last_status: error ? `schedule_error: ${error}` : schedule.last_status
+      last_status: statusAfterResolve(schedule, error)
     });
     return next_run_at;
   }

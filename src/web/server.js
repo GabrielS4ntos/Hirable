@@ -93,7 +93,8 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
       scheduler: scheduler.status(),
       schedules,
       counts: {
-        jobs: store.agentRecordCounts("job"),
+        // Keyed by record kind, matching RECORD_KINDS.
+        job: store.agentRecordCounts("job"),
         dm: store.agentRecordCounts("dm"),
         invite: store.agentRecordCounts("invite")
       },

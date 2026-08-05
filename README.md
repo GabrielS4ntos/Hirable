@@ -1,245 +1,287 @@
-# LinkedIn local agent
+# LinkedIn Local Agent
 
-Local script layer for LinkedIn automation.
+A local job-search assistant. It scans LinkedIn for openings, evaluates each one against
+your profile with an LLM, and submits Easy Apply applications — either on a schedule you
+control or one click at a time. It also drafts replies to recruiter DMs and accepts pending
+connection invitations.
 
-Current stage:
+Everything runs on your machine, against your own browser session and your own API keys.
+There is no server, no account, and no data leaves your computer except the calls you make
+to the model provider.
 
-- Open LinkedIn with a persistent local browser profile.
-- Read the messaging list through the DOM.
-- Produce compact JSON only.
-- Compare the result with the operational state stored in local SQLite.
-- Exit without calling any model when there is no new inbound DM signal.
-- Do not trigger the model when the last visible message is from the profile owner (`Voce:`, `Você:`, or `You:`).
-- When opening a conversation, check the last extracted sender before normalizing/filtering dates.
-- Never send messages in this stage.
+<p align="center">
+  <img src="docs/screenshots/jobs.jpg" alt="Analyzed jobs screen with per-row send state" width="100%">
+</p>
 
-Commands:
+---
+
+## Contents
+
+- [Why it is built this way](#why-it-is-built-this-way)
+- [Screens](#screens)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+  - [Docker (recommended)](#docker-recommended)
+  - [Node (local)](#node-local)
+- [First-run setup](#first-run-setup)
+- [Configuration](#configuration)
+- [Scheduling](#scheduling)
+- [Safety model](#safety-model)
+- [Architecture](#architecture)
+- [CLI reference](#cli-reference)
+- [Development](#development)
+- [Troubleshooting](#troubleshooting)
+- [Disclaimer](#disclaimer)
+
+---
+
+## Why it is built this way
+
+Applying to jobs at scale is easy to get wrong in ways that are expensive and hard to undo:
+a bot that answers a disability question on your behalf, applies to a vacancy reserved for a
+group you do not belong to, or emails a recruiter before you have reviewed anything.
+
+Three decisions follow from that:
+
+1. **Nothing is declared for you.** Sensitive fields default to *not informed*, and a blank
+   field is never read as a "yes".
+2. **Nothing sends by default.** Email delivery, automatic scheduling and Easy Apply are all
+   opt-in, and each shows exactly why it is currently disabled.
+3. **The guard rails are code, not settings.** The list of questions the agent must refuse
+   lives in a source file, so widening it requires a diff — not a click.
+
+## Screens
+
+| | |
+|---|---|
+| **Dashboard** — counters, per-pipeline status and run history | **Analyzed jobs** — every item in one table with a send button |
+| <img src="docs/screenshots/dashboard.jpg" alt="Dashboard" width="100%"> | <img src="docs/screenshots/jobs.jpg" alt="Analyzed jobs" width="100%"> |
+| **Onboarding** — paste a résumé, an agent fills the profile | **Settings** — Google integration and pipeline behaviour |
+| <img src="docs/screenshots/onboarding.jpg" alt="Onboarding" width="100%"> | <img src="docs/screenshots/settings-pipelines.jpg" alt="Pipeline settings" width="100%"> |
+
+## Requirements
+
+- **Node.js 22.5+** — the app uses the built-in `node:sqlite` module.
+- **A Gemini API key** (free tier is enough to start). An OpenRouter key is optional and
+  used as a fallback when Gemini returns a quota error.
+- **A LinkedIn account**, logged in once through the app's persistent browser profile.
+- Docker, if you prefer the container route.
+
+## Quick start
+
+### Docker (recommended)
 
 ```bash
-npm run dm:check
-npm run dm:check:headed
-npm run dm:check:headless
-npm run dm:debug
-npm run dm:mock
-npm run network:accept
-npm run jobs:scan
-npm run jobs:apply
-npm run jobs:apply-one -- <record_id|job_id>
-npm run profile:extract < curriculo.txt
-npm run jobs:form-smoke -- 'https://www.linkedin.com/jobs/view/<id>/apply/?openSDUIApplyFlow=true'
-npm run semantic:mock
-npm run semantic:smoke
-npm run gmail:auth
-npm run gmail:test
-npm run validate
-npm run storage:status
-npm test
-npm run web
-npm run web:install
-npm run web:build
-npm run web:dev
+git clone https://github.com/GabrielS4ntos/linkedin-local-agent.git
+cd linkedin-local-agent
+docker compose up -d
 ```
 
-First run — no files to edit:
+Open <http://127.0.0.1:4321>.
 
-1. `npm install && npx playwright install chromium`
-2. `npm run web:install && npm run web:build`
-3. `npm run web` and open http://127.0.0.1:4321
-4. Complete the onboarding (paste your résumé), add a Gemini key in **Chaves de API**,
-   and set your job searches in **Configurações**.
-5. `npm run dm:check:headed` once, to log in to LinkedIn in the persistent browser profile.
+The database and the LinkedIn session live in a named volume, so `docker compose pull &&
+docker compose up -d` upgrades without losing state. The port is bound to `127.0.0.1` on
+purpose — this is a personal console, not a service to expose.
 
-Everything else — schedules, limits, searches, models, alerts, Google — is configured in
-the interface and stored in SQLite.
+> **One step still needs a real browser:** logging in to LinkedIn. Run
+> `npm run dm:check:headed` once on the host (see below) to create the session, or mount an
+> existing `.browser-profile` into `/data/browser-profile`. Everything after that runs
+> headless inside the container.
 
-The browser profile is stored in `.browser-profile` under this folder.
-
-## Web console
-
-A local React interface reads and writes the same SQLite database the pipelines use.
+### Node (local)
 
 ```bash
-npm run web:install   # once, installs the interface dependencies under web/
-npm run web:build     # compiles web/dist
-npm run web           # serves http://127.0.0.1:4321 and starts the scheduler
+git clone https://github.com/GabrielS4ntos/linkedin-local-agent.git
+cd linkedin-local-agent
+npm run setup     # installs deps, Chromium and builds the interface
+npm start         # http://127.0.0.1:4321
 ```
 
-For interface development run `npm run web` in one terminal and `npm run web:dev` in
-another; the Vite dev server on port 4322 proxies `/api` to the agent server.
+To keep it running in the background on macOS, copy
+`launchd/com.example.linkedin-web-console.plist.example` into `~/Library/LaunchAgents/`,
+replace `__PROJECT_DIR__` with the absolute path, and `launchctl bootstrap gui/$UID <file>`.
 
-The server binds to `127.0.0.1` only and rejects cross-origin browsers. It is a local
-control panel, not a service to expose on a network.
+## First-run setup
 
-Screens:
+There are no files to edit. The console walks you through it:
 
-- **Painel** — counters, per-pipeline status, "Executar agora" and run history.
-- **Vagas analisadas** — every analyzed item in one table with an **Enviar** button.
-- **Perfil** — the facts every agent uses, editable at any time.
-- **Configurações** — Google integration, alerts and the schedule of each pipeline.
-- **Chaves de API** — Gemini and OpenRouter keys.
+1. **Onboarding.** Paste your résumé and press **Preencher**. An agent extracts your
+   profile — contact details, target roles, years per technology, experience, education —
+   using the provider's structured-output mode, and shows it for review. Nothing is saved
+   until you confirm, and sensitive fields stay blank unless the résumé states them
+   explicitly.
+2. **API keys.** Add one or more Gemini keys under *Chaves de API*. Several keys are
+   consumed round-robin; an OpenRouter key becomes the fallback when they all hit quota.
+3. **Job searches.** Under *Configurações*, paste the LinkedIn search URLs you want scanned
+   (open a LinkedIn job search with your filters applied and copy the address bar).
+4. **LinkedIn login.** Run `npm run dm:check:headed` once and log in. The session persists
+   in `.browser-profile`.
+5. **Turn on a schedule.** Pipelines start in *manual*. Switch one to *automatic* when you
+   are comfortable with what it is doing.
 
-### Onboarding
+Optionally, connect Google under *Configurações* to receive alert emails and to have
+interview invitations written to your calendar.
 
-On first open the console shows an onboarding flow instead of the app: paste the
-résumé text, press **Preencher**, and an agent extracts the profile fields for you
-to review. Extraction only fills the form — nothing is written until you save — and
-it is rate limited to 3 immediate attempts, then one more every 30 seconds.
+## Configuration
 
-The completed flag lives in `user_profile` and is cached in memory on the server
-and in `localStorage` on the client, so the database is not queried on every poll.
+Settings resolve in this order, later winning:
 
-The extraction uses the provider's structured-output mode: the JSON shape is
-enforced by the decoder from a schema generated out of `src/profile-schema.js`,
-not merely requested in the prompt. Fields that fail validation fall back to their
-default without discarding the rest of the extraction.
+| Source | Purpose |
+|---|---|
+| `src/config-defaults.js` | Defaults in code — a fresh install boots with no files |
+| `config.json` | Optional legacy override, imported into the database on first boot |
+| Database | What you changed in *Configurações* |
+| Environment | Deployment-level overrides |
 
-### Profile and eligibility
+Environment variables: `AGENT_DATABASE_PATH`, `AGENT_PROFILE_PATH`,
+`AGENT_BROWSER_PROFILE_DIR`, `LINKEDIN_HEADLESS`, `GOOGLE_REDIRECT_PORT`, `WEB_HOST`,
+`WEB_PORT`.
 
-`src/profile-schema.js` is the single definition of the profile, consumed by the
-interface, the extraction prompt and the pipelines. The stored profile is merged
-over the legacy `profile.json`, which stays supported as a fallback.
+Two things are deliberately **not** editable through the interface:
 
-Sensitive fields (PCD/disability, veteran, gender, race, orientation) are a
-three-state choice, and **"Não informar" is the default**. This matters: the résumé
-cannot be trusted to state whether you belong to an affirmative-action group, so
-`src/job-eligibility.js` blocks any vacancy exclusive to a group the profile does
-not explicitly declare — silence is never read as a yes. The same gate runs on the
-manual send, so a click cannot bypass it. Plain diversity boilerplate ("pessoas com
-deficiência são bem-vindas") does not block anything: a restriction is only
-detected when a group term appears next to an exclusivity marker.
+- **Guard rails** (`SAFETY`) — the patterns the agent must never answer: visa status,
+  salary, race, disability, criminal history, government identifiers. If these were rows the
+  web API could write, a bug or a prompt injection reaching a write path could silently
+  widen what the automation discloses on your behalf.
+- **Hard ceilings** (`HARD_LIMITS`) — a preference may lower an application limit, never
+  raise it beyond what protects the account.
 
-### Google (Gmail and Calendar)
-
-Configured in **Configurações → Google**. Paste the OAuth client JSON downloaded
-from Google Cloud (the screen carries the step-by-step and links to the console),
-then click connect: the browser opens Google's consent screen and the token comes
-back to a one-shot loopback listener. No authorization code to copy by hand.
-
-Email sending is off until three things are true: an account is connected, a
-recipient is saved, and you explicitly enable it. Until then every pipeline that
-would send email skips it and logs the reason. Disconnecting the account switches
-email and calendar back off. Tokens live in `oauth_credentials`; the interface only
-ever receives presence flags and metadata, never the client secret or the token.
-
-### Configuration
-
-There is no configuration file to edit. Settings resolve in this order, later winning:
-
-1. **code defaults** (`src/config-defaults.js`) — a fresh install boots with no files;
-2. **`config.json`** — optional legacy override, imported into the database on first boot;
-3. **database** — what you changed in **Configurações**;
-4. **environment** — `AGENT_DATABASE_PATH`, `AGENT_PROFILE_PATH`, `AGENT_BROWSER_PROFILE_DIR`,
-   `LINKEDIN_HEADLESS`, `GOOGLE_REDIRECT_PORT`, for running more than one instance.
-
-Two things deliberately stay out of the database:
-
-- **Guard rails** (`SAFETY` in `src/config-defaults.js`): the patterns the agent must never
-  answer — visa, salary, race, disability, and so on. If these were rows the web interface
-  could write, a bug in the API or a prompt injection reaching a write path could silently
-  widen what the automation discloses on your behalf. Changing them requires editing the
-  file, which shows up in a diff.
-- **Hard ceilings** (`HARD_LIMITS`): a preference may lower a limit, never raise it above
-  what protects the LinkedIn account.
-
-The API refuses any path that is not on the `EDITABLE` whitelist, validates each value on
+The configuration API accepts only paths on an explicit whitelist, validates each value on
 its own, and applies the valid ones even when a sibling is rejected.
 
-### API keys
+## Scheduling
 
-Keys are stored in the `api_keys` table of the local SQLite file (`chmod 600`). Several
-Gemini keys can be registered and are consumed in round-robin; the OpenRouter key is the
-fallback used when every Gemini key fails with a quota error. A key can be disabled
-without deleting it, and the interface only ever shows a masked value.
+Each pipeline (`dm`, `network`, `jobs`) is independently configured:
 
-Database keys take precedence over `secrets/.env`. When no key is registered the agent
-falls back to `GEMINI_API_KEYS`/`GEMINI_API_KEY` and `OPENROUTER_API_KEY` as before, so
-existing setups keep working.
+- **Mode** — `automatic`, `manual` (runs only when you click) or `off`.
+- **Schedule** — a cron expression you write, a fixed interval, or a list of daily times.
+- **Window** — allowed weekdays and an hour range applied on top, so a frequent cron still
+  never fires at 3am.
+- **Jitter** — a random delay before each automatic run.
 
-### Pipeline scheduling
+Cron supports the standard five fields with ranges, lists, `*/steps`, month and weekday
+names, and `@daily`-style presets. The settings screen validates as you type and previews
+the next five executions.
 
-Each pipeline (`dm`, `network`, `jobs`) has a row in `pipeline_schedules` with:
+The scheduler runs inside `npm start`. It ticks every 30 seconds and executes **one pipeline
+at a time**, because they share a single Chromium profile. Every execution is recorded in
+`pipeline_runs` and shown on the dashboard.
 
-- **mode** — `auto` (the scheduler runs it), `manual` (only from the interface) or `off`
-  (never runs, which is how you take a pipeline out of the automatic rotation).
-- **schedule_kind** — `cron` (you write the expression), `interval` (every N minutes) or
-  `daily_times` (a list of `HH:MM`).
-- **weekdays**, **window_start**/**window_end** — an extra filter applied on top of the
-  schedule, so a frequent cron still never fires outside working hours.
-- **jitter_seconds** — random delay before an automatic run.
+## Safety model
 
-Cron accepts the standard 5 fields (`minuto hora dia mês dia-da-semana`) with `*`, ranges,
-lists, `/steps`, month/weekday names and `@daily`-style presets. The settings screen
-validates the expression while you type and previews the next five executions.
+**Standardized records.** Jobs, DMs and invitations are normalized into one shape and share
+a single table. `send_state` drives the button:
 
-The scheduler lives inside `npm run web`. It ticks every 30s, runs at most one pipeline at
-a time (they share one Chromium profile), and records every execution in `pipeline_runs`.
-Keep the server running — for example through a single launchd plist — for automatic mode
-to work.
-
-### Standardized agent records
-
-All pipelines normalize their agent output into one shape (`src/agent-record.js`) stored in
-`agent_records`, so jobs, DMs and invitations share the same table and columns in the
-interface: `title`, `subtitle`, `location`, `score`, `decision`, `confidence`, `risk_flags`,
-`reason`, `status`, `send_method` and `send_state`.
-
-`send_state` is what drives the **Enviar** button:
-
-| state | button | meaning |
-| --- | --- | --- |
+| State | Button | Meaning |
+|---|---|---|
 | `available` | enabled | analyzed and ready for a manual send |
-| `failed` | enabled | a previous send failed, retry is allowed |
+| `failed` | enabled | a previous attempt failed; retry allowed |
 | `in_progress` | disabled | a send is running right now |
 | `sent_auto` | disabled | already applied by the automatic pipeline |
-| `sent_manual` | disabled | already applied from this interface |
-| `unsupported` | disabled | no automatic send method (job without Easy Apply) |
+| `sent_manual` | disabled | already applied from the interface |
+| `unsupported` | disabled | no automatic send method (no Easy Apply) |
 | `blocked` | disabled | the agent or the safety rules refuse the send |
 
 Hovering a disabled button shows the exact reason. A rescan never downgrades a record that
 was already sent, so an application cannot be submitted twice.
 
-Manual sends run `jobs:apply-one`, which reuses the same Easy Apply flow, semantic memory
-and safety gates as the automatic pipeline, and respects the daily/weekly caps in
-`config.json`.
+**Restricted vacancies.** A résumé cannot be trusted to state whether you belong to an
+affirmative-action group. A deterministic guard blocks any vacancy exclusive to a group your
+profile does not explicitly declare — silence is never a yes — and the same gate runs on the
+manual send, so a click cannot bypass it. Ordinary diversity boilerplate does not block
+anything: a restriction is only detected when a group term appears next to an exclusivity
+marker.
 
-Local scheduling:
+**Untrusted content.** Job descriptions, form labels and résumé text are passed to models as
+data inside tagged blocks, never as instructions. Prompt-injection patterns are rejected
+before any field is filled.
 
-- `launchd/com.example.linkedin-web-console.plist.example` keeps `npm run web` alive. With
-  the console running, all scheduling is managed in the interface and the per-pipeline
-  plists below are no longer needed.
-- Generic launchd examples are available in `launchd/*.plist.example`.
-- Replace `__PROJECT_DIR__` with the absolute project directory and choose unique labels before loading them.
-- Local, machine-specific plists must not be committed.
+**Secrets.** API keys and OAuth tokens are stored in a `chmod 600` SQLite file. The
+interface only ever receives masked values and presence flags — never a key, a client secret
+or a token. Provider error messages are redacted before being displayed.
 
-Pipeline coordination:
+**Email.** Delivery stays off until an account is connected, a recipient is saved and you
+explicitly enable it. Disconnecting the account turns it back off.
 
-- All scripts use the same Playwright Chromium profile in `.browser-profile`.
-- A lock file prevents two pipelines from opening Chromium at the same time.
-- Keep DMs frequent, invitations slightly offset, and jobs at fixed low-frequency slots.
-- `jobs:scan` extracts jobs and the scheduled jobs pipeline can run Easy Apply when enabled in `config.json`.
-- `jobs:form-smoke` opens exactly one form with `LINKEDIN_STOP_BEFORE_SUBMIT=true`; it can never submit and is intended for selector validation.
+## Architecture
 
-Semantic form memory:
+```
+src/
+  cli.js               pipelines: dm:check, network:accept, jobs:scan, jobs:apply-one
+  config.js            resolves defaults ← config.json ← database ← environment
+  config-defaults.js   defaults, safety rails, hard limits, editable whitelist
+  profile-schema.js    the profile contract: UI, extraction prompt and agents
+  agent-record.js      one canonical record shape for every pipeline
+  job-eligibility.js   deterministic guard for restricted vacancies
+  cron.js              5-field cron parser and next-run resolver
+  scheduler.js         queue and executor, one pipeline at a time
+  semantic-memory.js   embedding-backed memory of previous form answers
+  app-store.js         SQLite: keys, schedules, runs, records, profile, settings
+  web/server.js        JSON API + static hosting, bound to loopback
+web/                   React + Vite + Tailwind + shadcn/ui console
+```
 
-- Uses local SQLite at `data/semantic-memory.sqlite` and Gemini `gemini-embedding-001` embeddings.
-- Flow: security gate, deterministic answers, exact approved memory, vector similarity, then the bounded form-filling model.
-- Model answers are stored as pending and become approved only after the form advances without validation errors.
-- Prompt-injection patterns are blocked before any deterministic, semantic, or model filling. Sensitive answers are used only when explicitly present in the ignored trusted profile and exactly match a visible option; otherwise the automation opts out or stops.
-- Automatic vector reuse requires similarity `>= 0.92` and a non-ambiguous score margin; lower trusted matches can be supplied as model hints.
-- The embedding circuit breaker disables further embedding calls for the current run after provider failure.
-- Node.js 22.5 or newer is required. Node 22 may print an `ExperimentalWarning` for its built-in SQLite module.
-- On the first run, legacy `state.json` content is imported into the same SQLite database and the original file is preserved as a local, ignored backup.
+One SQLite file holds everything. The CLI and the web server are separate processes over the
+same database, which is why a pipeline can be started from the interface, from a terminal, or
+from a scheduler without any coordination beyond a run lock.
 
-Gmail OAuth:
+## CLI reference
 
-1. Create a Google Cloud OAuth client for a Desktop app.
-2. Save the downloaded JSON as `secrets/gmail-oauth-client.json`.
-3. Run `npm run gmail:auth`.
-4. Run `npm run gmail:test`.
-5. Set `gmail.enabled` and `alerts.email_enabled` to `true` in `config.json`.
+Every pipeline is runnable directly, which is useful for debugging:
 
-Private local data:
+```bash
+npm start                       # web console + scheduler
+npm run dm:check                # read the inbox, draft and send replies
+npm run dm:check:headed         # same, with a visible browser (use this to log in)
+npm run network:accept          # accept pending invitations
+npm run jobs:scan               # scan, evaluate and apply within the limits
+npm run jobs:apply-one -- <id>  # apply to a single record
+npm run profile:extract < cv.txt   # profile extraction, prints JSON
+npm run auth:status             # keys and Google token status
+npm run storage:status          # database summary
+npm run validate                # configuration sanity check
+npm test                        # 148 unit tests
+```
 
-- `config.json`, `profile.json`, `state.json`, `data/`, `secrets/`, `.browser-profile/`, logs and machine-specific launchd files are ignored by Git.
-- `state.json` is only a preserved migration backup after the operational state is imported into SQLite.
-- Never place API keys, OAuth tokens, resumes or browser session files in source-controlled examples.
+`npm run jobs:form-smoke -- <url>` opens exactly one Easy Apply form with
+`LINKEDIN_STOP_BEFORE_SUBMIT=true`; it can never submit and exists to validate selectors.
+
+## Development
+
+```bash
+npm run web        # API on :4321
+npm run web:dev    # Vite dev server on :4322, proxies /api
+npm test
+```
+
+Local data — `config.json`, `profile.json`, `data/`, `secrets/`, `.browser-profile/`, logs
+and machine-specific launchd files — is gitignored. Never commit API keys, tokens or résumés.
+
+## Troubleshooting
+
+**"Perfil incompleto"** — complete the onboarding, or keep a valid `profile.json`.
+
+**"Nenhuma chave Gemini cadastrada"** — add a key under *Chaves de API*, or export
+`GEMINI_API_KEYS` in `secrets/.env`.
+
+**A pipeline reports `needs_login`** — the LinkedIn session expired. Run
+`npm run dm:check:headed` and log in again.
+
+**A schedule shows `schedule_error`** — the expression never matches the allowed window or
+weekdays. The settings screen previews the next executions; an empty preview means the same.
+
+**Automatic mode does nothing** — the scheduler lives inside the web server. It must stay
+running (`npm start`, `docker compose up -d`, or the launchd agent).
+
+**Chromium crashes in Docker** — increase `shm_size` in `compose.yaml`.
+
+## Disclaimer
+
+This project automates a logged-in LinkedIn session. That is against LinkedIn's User
+Agreement, and using it puts your account at risk. The defaults are conservative — low
+application ceilings, jitter between actions, one browser at a time — but the risk does not
+go to zero. Use it on an account you can afford to lose, and read what it is about to do
+before turning any pipeline to automatic.
+
+The agent submits real applications to real companies on your behalf. Review the analyzed
+jobs before enabling automatic Easy Apply.

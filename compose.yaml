@@ -1,0 +1,18 @@
+services:
+  agent:
+    build: .
+    image: linkedin-local-agent
+    container_name: linkedin-local-agent
+    restart: unless-stopped
+    # Bound to loopback: this is a personal console, never expose it to a network.
+    ports:
+      - "127.0.0.1:4321:4321"
+    volumes:
+      # Database, LinkedIn session and logs survive rebuilds.
+      - agent-data:/data
+      - ./logs:/app/logs
+    # Chromium needs a larger shared memory segment than the 64MB default.
+    shm_size: "1gb"
+
+volumes:
+  agent-data:
