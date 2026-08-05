@@ -48,10 +48,15 @@ No framework on the server: `src/web/server.js` is a hand-rolled `node:http` rou
 loopback that also serves `web/dist`.
 
 **Two processes, one SQLite file.** The web server (API + scheduler) and the CLI are separate
-processes over `data/app.sqlite`. A pipeline can therefore be started from the interface, a
+processes over one database. A pipeline can therefore be started from the interface, a
 terminal, or an OS scheduler with no coordination beyond a run lock. Any invariant that must
 hold has to be enforced in *both* the API/scheduler and the CLI — enforcing it only in the UI
 is not enforcement.
+
+The file is **`data/semantic-memory.sqlite`** — the name is historical, since it started as the
+semantic-memory store and grew into the whole application store. Resolve it with
+`bootstrapDatabasePath()` from `src/config.js`; typing a filename is how you end up reading a
+database the app never opens.
 
 **Config layering** (`src/config.js`): `DEFAULTS` ← database overrides ← environment, and
 then `SAFETY` is force-applied last so nothing can
