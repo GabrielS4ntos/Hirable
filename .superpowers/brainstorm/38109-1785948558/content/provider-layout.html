@@ -1,0 +1,39 @@
+<h2>Ordem e hierarquia dos cards de providers</h2>
+<p class="subtitle">As duas opções removem o exemplo de API key do subtítulo e exibem o modelo padrão. A diferença é apenas a distribuição das ações.</p>
+
+<div class="cards">
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:24px;background:#f8fafc">
+      <div style="background:white;border:1px solid #dbe2ea;border-radius:12px;padding:18px;max-width:340px;margin:auto">
+        <div style="font-weight:700">OpenAI <span style="float:right;font-size:12px;border:1px solid #cbd5e1;border-radius:12px;padding:2px 8px">Não configurado</span></div>
+        <div style="font-size:13px;color:#64748b;margin-top:3px">gpt-5.4-mini</div>
+        <div style="font-size:13px;color:#64748b;margin:18px 0">Nenhuma chave ativa · Obter chave</div>
+        <div style="display:grid;gap:8px">
+          <button class="mock-button" disabled style="opacity:.45">Tornar principal</button>
+          <button class="mock-button">Adicionar chave</button>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Coluna estável (recomendada)</h3>
+      <p>As ações ocupam posições previsíveis. “Adicionar chave” fica sempre no final; ações indisponíveis permanecem visíveis e desabilitadas.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:24px;background:#f8fafc">
+      <div style="background:white;border:1px solid #dbe2ea;border-radius:12px;padding:18px;max-width:340px;margin:auto">
+        <div style="font-weight:700">OpenAI <span style="float:right;font-size:12px;border:1px solid #cbd5e1;border-radius:12px;padding:2px 8px">Não configurado</span></div>
+        <div style="font-size:13px;color:#64748b;margin-top:3px">gpt-5.4-mini</div>
+        <div style="font-size:13px;color:#64748b;margin:18px 0 49px">Nenhuma chave ativa · Obter chave</div>
+        <div style="display:grid;gap:8px">
+          <button class="mock-button">Adicionar chave</button>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Somente ações disponíveis</h3>
+      <p>“Tornar principal” aparece acima de “Adicionar chave” apenas depois da configuração. O card inicial fica mais limpo, mas muda de altura e composição.</p>
+    </div>
+  </div>
+</div>

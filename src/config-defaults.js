@@ -82,6 +82,9 @@ export const DEFAULTS = {
 
   browser: {
     user_data_dir: "./.browser-profile",
+    // Empty uses the Chromium bundled with Playwright; "chrome"/"msedge" use the
+    // browser already installed on the machine, with this same profile directory.
+    channel: "",
     headless: true,
     slow_mo_ms: 0,
     navigation_timeout_ms: 45000
@@ -216,6 +219,7 @@ export const EDITABLE = [
   { path: "pause.allow_manual_runs", type: "boolean", label: "Permitir execução manual durante a pausa" },
 
   { path: "browser.headless", type: "boolean", label: "Navegador em segundo plano" },
+  { path: "browser.channel", type: "enum", options: ["", "chrome", "msedge"], label: "Navegador usado" },
   { path: "browser.slow_mo_ms", type: "int", min: 0, max: 5000, label: "Atraso entre ações (ms)" },
   { path: "browser.navigation_timeout_ms", type: "int", min: 5000, max: 180000, label: "Timeout de navegação (ms)" },
 
@@ -298,6 +302,15 @@ export function coerceEditable(path, value) {
         } catch {
           throw new Error(`${field.label}: fuso IANA inválido`);
         }
+      }
+      return text;
+    }
+
+    case "enum": {
+      const text = String(value ?? "").trim();
+      // This value selects an executable, so only the listed options are accepted.
+      if (!field.options.includes(text)) {
+        throw new Error(`${field.label}: escolha uma das opções disponíveis`);
       }
       return text;
     }

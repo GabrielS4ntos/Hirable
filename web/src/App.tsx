@@ -149,6 +149,15 @@ function AppShell() {
                     ? t("app.runningPipeline", { pipeline: pipelineLabel(running.pipeline, running.pipeline, locale) })
                     : t("app.schedulerIdle")}
               </div>
+              <div className="flex items-center gap-2">
+                <span
+                  className={cn(
+                    "size-2 rounded-full",
+                    status.data?.linkedin_gate?.ready ? "bg-success" : "bg-destructive"
+                  )}
+                />
+                {status.data?.linkedin_gate?.ready ? t("linkedin.connectedShort") : t("linkedin.disconnectedShort")}
+              </div>
               {status.data ? <p className="font-mono">{status.data.timezone}</p> : null}
             </div>
           </aside>

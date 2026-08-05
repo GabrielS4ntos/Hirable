@@ -108,6 +108,16 @@ server stores it in `app_settings`; the button re-arms only when that changes, s
 run costs a model call and returns identical fields. `web/src/lib/hash.ts` mirrors the same
 normalization client-side so both sides compare the same value.
 
+**LinkedIn session.** `linkedin-session.js` decides what counts as signed in, and requires two
+independent signals — the URL did not bounce to the login pattern **and** the `li_at` cookie is
+present — because either one alone lies. A `checkpoint` URL is two-step verification in
+progress, so the login loop waits instead of failing. The session is never copied out of the
+Chromium profile; `app_settings.linkedin_session` holds state only. `linkedin-gate.js` blocks
+runs but deliberately does **not** park schedules the way the profile gate does: expiry is
+transient and frequent, and clearing `next_run_at` each time would turn it into a mess.
+`linkedin:login` runs as a queued CLI command so the login window takes the same turn a pipeline
+would — the browser profile is exclusive and two processes cannot open it.
+
 **Résumés.** `resume-gate.js` blocks Easy Apply and the digest email when no document is
 stored; scanning stays allowed because it sends nothing. `resume-selection.js` holds the
 résumé step of the form and is separate from `cli.js` precisely so the decision flow — expand,

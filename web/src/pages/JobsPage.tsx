@@ -61,8 +61,15 @@ export function JobsPage({ status }: PageProps) {
   // the profile the agent answers from, and the résumé it attaches.
   const gate = status?.profile_gate ?? null;
   const resumeGate = status?.resume_gate ?? null;
-  const gateBlocked = Boolean(gate && !gate.ready) || Boolean(resumeGate && !resumeGate.ready);
-  const gateMessage = gate && !gate.ready ? "error.profile_incomplete" : "error.no_resume";
+  const linkedinGate = status?.linkedin_gate ?? null;
+  const gateBlocked =
+    Boolean(gate && !gate.ready) || Boolean(resumeGate && !resumeGate.ready) || Boolean(linkedinGate && !linkedinGate.ready);
+  const gateMessage =
+    linkedinGate && !linkedinGate.ready
+      ? "error.linkedin_disconnected"
+      : gate && !gate.ready
+        ? "error.profile_incomplete"
+        : "error.no_resume";
 
   async function handleSend(record: AgentRecord) {
     setSending((current) => new Set(current).add(record.record_id));
@@ -87,7 +94,13 @@ export function JobsPage({ status }: PageProps) {
 
   return (
     <div className="space-y-5">
-      <ProfileGateBanner gate={gate} resumeGate={resumeGate} onGoToProfile={() => { window.location.hash = "/perfil"; }} />
+      <ProfileGateBanner
+        gate={gate}
+        resumeGate={resumeGate}
+        linkedinGate={linkedinGate}
+        onGoToProfile={() => { window.location.hash = "/perfil"; }}
+        onGoToSettings={() => { window.location.hash = "/configuracoes"; }}
+      />
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <SummaryTile label={t("dashboard.ready")} value={counts.available ?? 0} tone="primary" />

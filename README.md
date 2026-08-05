@@ -133,8 +133,16 @@ There are no files to edit. The console walks you through it:
    Apply. Each is summarized once so the agent can pick the right one per job.
 5. **Job searches.** Under *Configurações*, paste the LinkedIn search URLs you want scanned
    (open a LinkedIn job search with your filters applied and copy the address bar).
-6. **LinkedIn login.** Run `npm run dm:check:headed` once and log in. The session persists
-   in `.browser-profile`.
+6. **LinkedIn.** The first card on the onboarding screen. Press **Conectar**: a real browser
+   window opens on this machine, you sign in there, and the window closes on its own once the
+   app sees the session. The dot turns green with the account name. Nothing about the login is
+   handled by the app — it never reads, fills or stores a credential, and the session stays in
+   the browser profile, exactly where the browser puts it. Two-step verification works because
+   you are the one in the window.
+
+   The card also chooses which browser opens: the bundled Playwright Chromium (default) or the
+   Chrome/Edge already installed — always with the app's own profile directory, never your
+   personal one.
 7. **Turn on a schedule.** Pipelines start in *manual*. Switch one to *automatic* when you
    are comfortable with what it is doing.
 
@@ -387,14 +395,18 @@ and machine-specific launchd files — is gitignored. Never commit API keys, tok
 **"Nenhuma chave Gemini cadastrada"** — add a key under *Chaves de API*, or export
 `GEMINI_API_KEYS` in `secrets/.env`.
 
-**A pipeline reports `needs_login`** — the LinkedIn session expired. Run
-`npm run dm:check:headed` and log in again.
+**A pipeline reports `needs_login`** — the LinkedIn session expired. Reconnect from the
+LinkedIn card in *Configurações*.
 
 **A schedule shows `schedule_error`** — the expression never matches the allowed window or
 weekdays. The settings screen previews the next executions; an empty preview means the same.
 
 **Automatic mode does nothing** — the scheduler lives inside the web server. It must stay
 running (`npm start`, `docker compose up -d`, or the launchd agent).
+
+**A pipeline reports `linkedin_disconnected`** — LinkedIn ended the session, which it does
+periodically. The dot in the sidebar turns red; press **Reconectar** on the LinkedIn card. The
+schedules stay armed and resume on their own once the session is back.
 
 **Chromium crashes in Docker** — increase `shm_size` in `compose.yaml`.
 

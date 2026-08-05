@@ -20,6 +20,7 @@ import { assertLaunchAllowed, sandboxEnv } from "../auto-fix-sandbox.js";
 import { detectSupervisor } from "../service-restart.js";
 import { RESUME_GATE_CODE, evaluateResumeGate } from "../resume-gate.js";
 import { extractionChanged, hashResumeFile, hashResumeText } from "../extraction-source.js";
+import { LINKEDIN_GATE_CODE, evaluateLinkedInGate } from "../linkedin-gate.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = path.resolve(path.dirname(__filename), "..", "..");
@@ -86,6 +87,15 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
 
   const profileGate = () => profileGateState(store, getConfig());
   const resumeGate = () => evaluateResumeGate(store.listResumes());
+  const linkedInSession = () => store.getSetting("linkedin_session", null);
+  const linkedInGate = () => evaluateLinkedInGate(linkedInSession());
+
+  /** Refuses anything that drives LinkedIn without a live session. */
+  const requireLinkedIn = () => {
+    const gate = linkedInGate();
+    if (!gate.ready) throw new HttpError(409, gate.reason, LINKEDIN_GATE_CODE);
+    return gate;
+  };
 
   /** Refuses anything that would submit an application without a résumé to attach. */
   const requireResume = () => {
@@ -121,6 +131,7 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
       onboarding: { complete: onboardingComplete },
       profile_gate: profileGate(),
       resume_gate: resumeGate(),
+      linkedin_gate: linkedInGate(),
       scheduler: scheduler.status(),
       schedules,
       counts: {
@@ -366,6 +377,53 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
     }
   });
 
+  /* ------------------------------------------------------------- linkedin */
+
+  /**
+   * The LinkedIn session, driven from the interface.
+   *
+   * Connecting runs as a queued CLI command rather than inside this process:
+   * the Chromium profile is exclusive, so the login window has to take the same
+   * turn a pipeline would, and the queue already guarantees that.
+   */
+  route("GET", /^\/api\/linkedin$/, () => {
+    const session = linkedInSession();
+    const running = scheduler.status();
+    return {
+      session: session || { state: "disconnected", account_name: "", connected_at: null, checked_at: null, last_reason: "" },
+      gate: linkedInGate(),
+      // A login window is open exactly while that command holds the queue.
+      pending: running.running?.pipeline === "linkedin" || running.queued.some((item) => item.pipeline === "linkedin"),
+      channel: getConfig().browser?.channel || "",
+      channels: ["", "chrome", "msedge"]
+    };
+  });
+
+  route("POST", /^\/api\/linkedin\/(connect|logout)$/, (req, res, [action]) => {
+    const command = action === "connect" ? "linkedin:login" : "linkedin:logout";
+    let runId;
+    try {
+      runId = scheduler.enqueueCommand("linkedin", command, [], "manual");
+    } catch (error) {
+      if (error.code === "pause_active") throw new HttpError(409, "Pausa global ativa", "pause_active");
+      if (error.code === PROFILE_GATE_CODE) throw new HttpError(409, error.message, PROFILE_GATE_CODE);
+      throw error;
+    }
+    return { run_id: runId, session: linkedInSession(), scheduler: scheduler.status() };
+  });
+
+  route("POST", /^\/api\/linkedin\/verify$/, async () => {
+    const limit = store.consumeRateLimit("linkedin_verify", { capacity: 3, refillPerSecond: 1 / 30 });
+    if (!limit.allowed) throw new HttpError(429, `Aguarde ${limit.retry_after_seconds}s antes de verificar novamente`, "rate_limited");
+
+    try {
+      await runCliJson("linkedin:status", [], { timeoutMs: 90_000 });
+    } catch (error) {
+      throw new HttpError(502, `Falha ao verificar a sessão: ${error.message}`);
+    }
+    return { session: linkedInSession(), gate: linkedInGate() };
+  });
+
   /* -------------------------------------------------------------- resumes */
 
   const resumesDir = () => path.resolve(ROOT, path.dirname(bootstrapDatabasePath()), "resumes");
@@ -521,7 +579,8 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
     })),
     available: PIPELINES,
     profile_gate: profileGate(),
-    resume_gate: resumeGate()
+    resume_gate: resumeGate(),
+    linkedin_gate: linkedInGate()
   }));
 
   route("PUT", /^\/api\/pipelines\/([\w-]+)$/, async (req, res, [pipeline]) => {
@@ -543,6 +602,7 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
 
   route("POST", /^\/api\/pipelines\/([\w-]+)\/run$/, (req, res, [pipeline]) => {
     requireProfile();
+    requireLinkedIn();
     let runId;
     try {
       runId = scheduler.enqueue(pipeline, "force");
@@ -587,6 +647,7 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
   route("POST", /^\/api\/records\/([\w-]+)\/send$/, (req, res, [id]) => {
     requireProfile();
     requireResume();
+    requireLinkedIn();
     const record = store.getAgentRecord(id);
     if (!record) throw new HttpError(404, "registro não encontrado");
     if (!["available", "failed"].includes(record.send_state)) {

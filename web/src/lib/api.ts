@@ -168,12 +168,37 @@ export type ResumeGate = {
   count: number;
 };
 
+/** State of the LinkedIn session. The session itself never leaves the browser profile. */
+export type LinkedInSession = {
+  state: "connected" | "disconnected" | "pending" | "expired";
+  account_name: string;
+  connected_at: string | null;
+  checked_at: string | null;
+  last_reason: string;
+};
+
+export type LinkedInGate = {
+  ready: boolean;
+  state: string;
+  code: string | null;
+  reason: string | null;
+};
+
+export type LinkedInPayload = {
+  session: LinkedInSession;
+  gate: LinkedInGate;
+  pending: boolean;
+  channel: string;
+  channels: string[];
+};
+
 export type StatusPayload = {
   now: string;
   timezone: string;
   onboarding: { complete: boolean };
   profile_gate: ProfileGate;
   resume_gate: ResumeGate;
+  linkedin_gate: LinkedInGate;
   scheduler: {
     running: { pipeline: string; run_id: string; started_at: string } | null;
     queued: { pipeline: string; run_id: string; trigger: string }[];
@@ -453,6 +478,11 @@ export const api = {
   listAlerts: (limit = 50) =>
     request<{ items: AlertEvent[]; dedupe_minutes: number }>(`/api/alerts?limit=${limit}`),
 
+  getLinkedIn: () => request<LinkedInPayload>("/api/linkedin"),
+  connectLinkedIn: () => request<{ run_id: string }>("/api/linkedin/connect", { method: "POST" }),
+  logoutLinkedIn: () => request<{ run_id: string }>("/api/linkedin/logout", { method: "POST" }),
+  verifyLinkedIn: () => request<{ session: LinkedInSession; gate: LinkedInGate }>("/api/linkedin/verify", { method: "POST" }),
+
   getConfig: () => request<ConfigPayload>("/api/config"),
   saveConfig: (values: Record<string, any>) =>
     request<{ applied: string[]; rejected: { path: string; error: string }[]; fields: ConfigField[] }>("/api/config", {
@@ -461,7 +491,9 @@ export const api = {
     }),
 
   listPipelines: () =>
-    request<{ items: PipelineSchedule[]; profile_gate: ProfileGate; resume_gate: ResumeGate }>("/api/pipelines"),
+    request<{ items: PipelineSchedule[]; profile_gate: ProfileGate; resume_gate: ResumeGate; linkedin_gate: LinkedInGate }>(
+      "/api/pipelines"
+    ),
   updatePipeline: (pipeline: string, patch: Partial<PipelineSchedule>) =>
     request<{ item: PipelineSchedule }>(`/api/pipelines/${pipeline}`, { method: "PUT", body: JSON.stringify(patch) }),
   runPipeline: (pipeline: string) => request<{ run_id: string }>(`/api/pipelines/${pipeline}/run`, { method: "POST" }),

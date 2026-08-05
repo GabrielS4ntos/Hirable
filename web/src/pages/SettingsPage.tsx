@@ -4,6 +4,7 @@ import { usePolling } from "@/hooks/usePolling";
 import type { PageProps } from "@/lib/page";
 import { PipelineCard } from "@/components/PipelineCard";
 import { GoogleIntegrationCard } from "@/components/GoogleIntegrationCard";
+import { LinkedInCard } from "@/components/LinkedInCard";
 import { GeneralSettingsCard } from "@/components/GeneralSettingsCard";
 import { AlertsCard } from "@/components/AlertsCard";
 
@@ -11,10 +12,19 @@ export function SettingsPage(_props: PageProps) {
   const pipelines = usePolling(api.listPipelines, 8000);
   const gate = pipelines.data?.profile_gate ?? null;
   const resumeGate = pipelines.data?.resume_gate ?? null;
+  const linkedinGate = pipelines.data?.linkedin_gate ?? null;
 
   return (
     <div className="space-y-6">
-      <ProfileGateBanner gate={gate} resumeGate={resumeGate} onGoToProfile={() => { window.location.hash = "/perfil"; }} />
+      <ProfileGateBanner
+        gate={gate}
+        resumeGate={resumeGate}
+        linkedinGate={linkedinGate}
+        onGoToProfile={() => { window.location.hash = "/perfil"; }}
+        onGoToSettings={() => { window.location.hash = "/configuracoes"; }}
+      />
+
+      <LinkedInCard onChange={pipelines.refresh} />
 
       <GoogleIntegrationCard />
 

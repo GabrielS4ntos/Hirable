@@ -1,5 +1,5 @@
-import { FileWarning, TriangleAlert, UserPen } from "lucide-react";
-import type { ProfileGate, ResumeGate } from "@/lib/api";
+import { FileWarning, PlugZap, TriangleAlert, UserPen } from "lucide-react";
+import type { LinkedInGate, ProfileGate, ResumeGate } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 import { Button } from "@/components/ui/button";
 
@@ -14,24 +14,34 @@ import { Button } from "@/components/ui/button";
 export function ProfileGateBanner({
   gate,
   resumeGate,
-  onGoToProfile
+  linkedinGate,
+  onGoToProfile,
+  onGoToSettings
 }: {
   gate?: ProfileGate | null;
   resumeGate?: ResumeGate | null;
+  linkedinGate?: LinkedInGate | null;
   onGoToProfile?: () => void;
+  onGoToSettings?: () => void;
 }) {
   const { t } = useI18n();
 
   const profileBlocked = Boolean(gate && !gate.ready);
   const resumeBlocked = Boolean(resumeGate && !resumeGate.ready);
-  if (!profileBlocked && !resumeBlocked) return null;
+  const linkedinBlocked = Boolean(linkedinGate && !linkedinGate.ready);
+  if (!profileBlocked && !resumeBlocked && !linkedinBlocked) return null;
 
-  // An incomplete profile blocks strictly more than a missing résumé, so it is
-  // the one worth naming when both are open.
-  const Icon = profileBlocked ? TriangleAlert : FileWarning;
-  const title = profileBlocked ? t("gate.title") : t("gate.resumeTitle");
-  const description = profileBlocked ? t("gate.description") : t("gate.resumeDescription");
-  const cta = profileBlocked ? t("gate.cta") : t("gate.resumeCta");
+  // A missing LinkedIn session stops everything, including scanning, so it wins
+  // the headline; an incomplete profile blocks more than a missing résumé.
+  const Icon = linkedinBlocked ? PlugZap : profileBlocked ? TriangleAlert : FileWarning;
+  const title = linkedinBlocked ? t("gate.linkedinTitle") : profileBlocked ? t("gate.title") : t("gate.resumeTitle");
+  const description = linkedinBlocked
+    ? (linkedinGate?.reason ?? t("gate.linkedinDescription"))
+    : profileBlocked
+      ? t("gate.description")
+      : t("gate.resumeDescription");
+  const cta = linkedinBlocked ? t("gate.linkedinCta") : profileBlocked ? t("gate.cta") : t("gate.resumeCta");
+  const action = linkedinBlocked ? onGoToSettings : onGoToProfile;
 
   return (
     <div className="flex flex-wrap items-start gap-3 rounded-xl border border-warning/40 bg-warning/10 px-4 py-3">
@@ -46,9 +56,9 @@ export function ProfileGateBanner({
           <p className="text-xs text-muted-foreground">{t("gate.alsoResume")}</p>
         ) : null}
       </div>
-      {onGoToProfile ? (
-        <Button size="sm" onClick={onGoToProfile}>
-          <UserPen />
+      {action ? (
+        <Button size="sm" onClick={action}>
+          {linkedinBlocked ? <PlugZap /> : <UserPen />}
           {cta}
         </Button>
       ) : null}

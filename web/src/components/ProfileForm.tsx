@@ -15,6 +15,7 @@ import { ResumeUploads } from "@/components/ResumeUploads";
 import { ResumeSourcePicker, type ResumeSource } from "@/components/ResumeSourcePicker";
 import { sha256Hex } from "@/lib/hash";
 import { ProviderCards } from "@/components/ProviderCards";
+import { LinkedInCard } from "@/components/LinkedInCard";
 import { localizedError, profileMetadata, useI18n, type Translate } from "@/lib/i18n";
 
 const MIN_RESUME_CHARS = 40;
@@ -178,6 +179,8 @@ export function ProfileForm({ mode, onSaved }: { mode: "onboarding" | "profile";
           </CardContent>
         </Card>
       ) : null}
+
+      {isOnboarding ? <LinkedInCard /> : null}
 
       <Card className={!providers.some((provider) => provider.configured) ? "border-primary/40" : undefined}>
         <CardHeader>

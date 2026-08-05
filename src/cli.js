@@ -30,6 +30,8 @@ import { PROFILE_GATE_CODE, profileGateState } from "./profile-gate.js";
 import { DEFAULT_DEDUPE_MINUTES } from "./alert-dedupe.js";
 import { RESUME_GATE_CODE, evaluateResumeGate } from "./resume-gate.js";
 import { canUploadResume } from "./resume-upload.js";
+import { LINKEDIN_GATE_CODE, evaluateLinkedInGate } from "./linkedin-gate.js";
+import { detectSession, sessionRecord } from "./linkedin-session.js";
 import { ensureResumeSelected } from "./resume-selection.js";
 import { renderAlertEmail } from "./email-template.js";
 import { runAutoFix } from "./auto-fix.js";
@@ -650,6 +652,178 @@ async function runGmailTest() {
     force: true
   });
   console.log(JSON.stringify({ status: result.status || "sent", id: result.id, to }, null, 2));
+}
+
+/* ------------------------------------------------------ LinkedIn session */
+
+const LINKEDIN_SESSION_KEY = "linkedin_session";
+const LINKEDIN_LOGIN_URL = "https://www.linkedin.com/login";
+const LINKEDIN_FEED_URL = "https://www.linkedin.com/feed/";
+
+function readLinkedInSession(config) {
+  try {
+    return openAppStore(config).getSetting(LINKEDIN_SESSION_KEY, null);
+  } catch {
+    return null;
+  }
+}
+
+function writeLinkedInSession(config, record) {
+  try {
+    return openAppStore(config).setSetting(LINKEDIN_SESSION_KEY, record);
+  } catch {
+    return record;
+  }
+}
+
+/**
+ * Flips the stored state the moment a pipeline hits the login wall.
+ *
+ * The dot in the interface should turn red when the session actually dies, not
+ * only when the user next asks — otherwise the console keeps claiming a
+ * connection that no longer exists.
+ */
+function markLinkedInDisconnected(config, reason = "needs_login") {
+  const current = readLinkedInSession(config);
+  return writeLinkedInSession(config, sessionRecord({
+    state: current?.state === "connected" ? "expired" : "disconnected",
+    account_name: current?.account_name || "",
+    reason
+  }));
+}
+
+/** Reads the live page and stores what it found. Shared by login and status. */
+async function inspectLinkedInSession(page, context, config) {
+  const cookies = await context.cookies("https://www.linkedin.com").catch(() => []);
+  const bodyText = await page.locator("body").innerText({ timeout: 4000 }).catch(() => "");
+  return detectSession({
+    url: page.url(),
+    cookies,
+    bodyText,
+    loginPattern: config.linkedin.login_url_pattern
+  });
+}
+
+/**
+ * Opens a real browser window and waits for the user to sign in.
+ *
+ * The window is the point: the password and any two-step challenge are typed by
+ * the person, in their own browser, and this process only watches the URL and
+ * the cookie jar to know when it worked. Nothing about the credentials is read,
+ * filled or stored.
+ */
+async function runLinkedInLogin() {
+  const config = loadConfig();
+  const timeoutMs = Number(process.env.LINKEDIN_LOGIN_TIMEOUT_MS || 10 * 60 * 1000);
+
+  return withRunLock(config, async () => {
+    writeLinkedInSession(config, sessionRecord({ state: "pending", reason: "aguardando_login" }));
+
+    // Headed regardless of the configured default: an invisible login window is
+    // a window nobody can type into.
+    const context = await openBrowserContext(config, { headless: false });
+    const startedAt = Date.now();
+    try {
+      const page = context.pages()[0] || await context.newPage();
+      page.setDefaultNavigationTimeout(config.browser.navigation_timeout_ms);
+      await page.goto(LINKEDIN_LOGIN_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+
+      while (Date.now() - startedAt < timeoutMs) {
+        await page.waitForTimeout(2000);
+        if (context.pages().length === 0) break;
+
+        const detected = await inspectLinkedInSession(page, context, config).catch(() => null);
+        if (detected?.connected) {
+          const record = writeLinkedInSession(config, sessionRecord({
+            state: "connected",
+            account_name: detected.account_name
+          }));
+          const result = { run_at: nowIso(), status: "connected", account_name: record.account_name };
+          await appendRunLog({ pipeline: "linkedin", ...result });
+          console.log(JSON.stringify(result, null, 2));
+          return result;
+        }
+      }
+
+      const closed = context.pages().length === 0;
+      const record = writeLinkedInSession(config, sessionRecord({
+        state: "disconnected",
+        reason: closed ? "janela_fechada_sem_login" : "tempo_esgotado"
+      }));
+      const result = { run_at: nowIso(), status: "not_connected", reason: record.last_reason };
+      await appendRunLog({ pipeline: "linkedin", ...result });
+      console.log(JSON.stringify(result, null, 2));
+      return result;
+    } finally {
+      await context.close().catch(() => {});
+    }
+  });
+}
+
+/** Headless check of the stored session, behind the "Verificar" button. */
+async function runLinkedInStatus() {
+  const config = loadConfig();
+  return withRunLock(config, async () => {
+    const context = await openBrowserContext(config, { headless: true });
+    try {
+      const page = context.pages()[0] || await context.newPage();
+      page.setDefaultNavigationTimeout(config.browser.navigation_timeout_ms);
+      await page.goto(LINKEDIN_FEED_URL, { waitUntil: "domcontentloaded" }).catch(() => {});
+      await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
+
+      const detected = await inspectLinkedInSession(page, context, config);
+      const previous = readLinkedInSession(config);
+      const record = writeLinkedInSession(config, sessionRecord({
+        // A session that was connected and is not anymore expired; one that was
+        // never connected is simply still disconnected.
+        state: detected.connected ? "connected" : (previous?.state === "connected" ? "expired" : "disconnected"),
+        account_name: detected.account_name || previous?.account_name || "",
+        reason: detected.reason
+      }));
+      const result = { run_at: nowIso(), status: record.state, account_name: record.account_name, reason: record.last_reason };
+      console.log(JSON.stringify(result, null, 2));
+      return result;
+    } finally {
+      await context.close().catch(() => {});
+    }
+  });
+}
+
+/**
+ * Signs out by removing the browser profile.
+ *
+ * There is no other way to drop a LinkedIn session: it lives in that directory
+ * and nowhere else. Doing it here means switching accounts never requires
+ * touching the filesystem by hand.
+ */
+async function runLinkedInLogout() {
+  const config = loadConfig();
+  return withRunLock(config, async () => {
+    const userDataDir = path.resolve(ROOT, config.browser.user_data_dir);
+    await fs.rm(userDataDir, { recursive: true, force: true });
+    writeLinkedInSession(config, sessionRecord({ state: "disconnected", reason: "desconectado_pelo_usuario" }));
+    const result = { run_at: nowIso(), status: "disconnected" };
+    await appendRunLog({ pipeline: "linkedin", ...result });
+    console.log(JSON.stringify(result, null, 2));
+    return result;
+  });
+}
+
+/** Refuses a pipeline run while there is no usable session. */
+async function skipIfLinkedInDisconnected(pipeline, config) {
+  const gate = evaluateLinkedInGate(readLinkedInSession(config));
+  if (gate.ready) return null;
+  const result = {
+    run_at: nowIso(),
+    pipeline,
+    status: "skipped",
+    code: LINKEDIN_GATE_CODE,
+    session_state: gate.state,
+    message: gate.reason
+  };
+  await appendRunLog(result);
+  console.log(JSON.stringify(result, null, 2));
+  return result;
 }
 
 async function runAuthStatus() {
@@ -1959,15 +2133,7 @@ async function runDmExtract() {
     return;
   }
 
-  const userDataDir = path.resolve(ROOT, config.browser.user_data_dir);
-  const headless = process.env.LINKEDIN_HEADLESS
-    ? process.env.LINKEDIN_HEADLESS === "true"
-    : config.browser.headless;
-
-  const context = await chromium.launchPersistentContext(userDataDir, {
-    headless,
-    slowMo: config.browser.slow_mo_ms
-  });
+  const context = await openBrowserContext(config);
 
   try {
     const page = context.pages()[0] || await context.newPage();
@@ -2072,19 +2238,13 @@ async function runDmCheckUnlocked() {
   const config = loadConfig();
   const blocked = await skipIfProfileIncomplete("dm", config);
   if (blocked) return blocked;
+  const disconnected = await skipIfLinkedInDisconnected("dm", config);
+  if (disconnected) return disconnected;
   const paused = await skipIfPaused("dm", config);
   if (paused) return paused;
   const state = await readAppState(config);
   const runAt = nowIso();
-  const userDataDir = path.resolve(ROOT, config.browser.user_data_dir);
-  const headless = process.env.LINKEDIN_HEADLESS
-    ? process.env.LINKEDIN_HEADLESS === "true"
-    : config.browser.headless;
-
-  const context = await chromium.launchPersistentContext(userDataDir, {
-    headless,
-    slowMo: config.browser.slow_mo_ms
-  });
+  const context = await openBrowserContext(config);
 
   try {
     const page = context.pages()[0] || await context.newPage();
@@ -2101,6 +2261,7 @@ async function runDmCheckUnlocked() {
         changed_count: 0
       };
       await appendRunLog(result);
+      markLinkedInDisconnected(config, "dm_check_needs_login");
       await notifyOperationalAlert("LinkedIn login required for DM watcher.", { command: "dm:check", status: "needs_login" });
       console.log(JSON.stringify(result, null, 2));
       if (!headless) {
@@ -2473,15 +2634,7 @@ async function runStorageStatus() {
 
 async function runDmDebug() {
   const config = loadConfig();
-  const userDataDir = path.resolve(ROOT, config.browser.user_data_dir);
-  const headless = process.env.LINKEDIN_HEADLESS
-    ? process.env.LINKEDIN_HEADLESS === "true"
-    : config.browser.headless;
-
-  const context = await chromium.launchPersistentContext(userDataDir, {
-    headless,
-    slowMo: config.browser.slow_mo_ms
-  });
+  const context = await openBrowserContext(config);
 
   try {
     const page = context.pages()[0] || await context.newPage();
@@ -2546,16 +2699,29 @@ async function withRunLock(config, fn) {
   }
 }
 
-async function withBrowser(config, fn) {
+/**
+ * One Chromium profile, one place that opens it.
+ *
+ * `channel` selects the user's installed Chrome/Edge instead of the bundled
+ * Chromium; empty means the bundled build, which is the one whose version is
+ * guaranteed to match this Playwright.
+ */
+async function openBrowserContext(config, { headless: headlessOverride } = {}) {
   const userDataDir = path.resolve(ROOT, config.browser.user_data_dir);
-  const headless = process.env.LINKEDIN_HEADLESS
-    ? process.env.LINKEDIN_HEADLESS === "true"
-    : config.browser.headless;
+  const headless = headlessOverride !== undefined
+    ? headlessOverride
+    : (process.env.LINKEDIN_HEADLESS ? process.env.LINKEDIN_HEADLESS === "true" : config.browser.headless);
 
-  const context = await chromium.launchPersistentContext(userDataDir, {
+  const channel = String(config.browser.channel || "").trim();
+  return chromium.launchPersistentContext(userDataDir, {
     headless,
-    slowMo: config.browser.slow_mo_ms
+    slowMo: config.browser.slow_mo_ms,
+    ...(channel ? { channel } : {})
   });
+}
+
+async function withBrowser(config, fn) {
+  const context = await openBrowserContext(config);
 
   try {
     const page = context.pages()[0] || await context.newPage();
@@ -2570,6 +2736,8 @@ async function runNetworkAccept() {
   const config = loadConfig();
   const blocked = await skipIfProfileIncomplete("network", config);
   if (blocked) return blocked;
+  const disconnected = await skipIfLinkedInDisconnected("network", config);
+  if (disconnected) return disconnected;
   const paused = await skipIfPaused("network", config);
   if (paused) return paused;
   const state = await readAppState(config);
@@ -2580,6 +2748,7 @@ async function runNetworkAccept() {
     const currentUrl = page.url();
     if (new RegExp(config.linkedin.login_url_pattern, "i").test(currentUrl)) {
       const result = { run_at: nowIso(), status: "needs_login", accepted_count: 0 };
+      markLinkedInDisconnected(config, "network_needs_login");
       await notifyOperationalAlert("LinkedIn login required for network invite pipeline.", { command: "network:accept", status: "needs_login" });
       console.log(JSON.stringify(result, null, 2));
       return result;
@@ -3256,6 +3425,7 @@ async function attemptEasyApply(page, job, config, modelEvaluation = null) {
   await page.waitForTimeout(1500);
 
   if (new RegExp(config.linkedin.login_url_pattern, "i").test(page.url())) {
+    markLinkedInDisconnected(config, "easy_apply_needs_login");
     return { status: "needs_login", audit };
   }
 
@@ -3643,6 +3813,8 @@ async function runJobsScan() {
   const config = loadConfig();
   const blocked = await skipIfProfileIncomplete("jobs", config);
   if (blocked) return blocked;
+  const disconnected = await skipIfLinkedInDisconnected("jobs", config);
+  if (disconnected) return disconnected;
   const profile = await loadProfile(config);
   if (process.env.LINKEDIN_JOBS_READ_ONLY === "true") config.jobs_watcher.read_only = true;
   const paused = await skipIfPaused("jobs", config);
@@ -3656,6 +3828,7 @@ async function runJobsScan() {
       await page.goto(search.url, { waitUntil: "domcontentloaded" });
       if (new RegExp(config.linkedin.login_url_pattern, "i").test(page.url())) {
         const result = { run_at: nowIso(), status: "needs_login", job_count: 0 };
+        markLinkedInDisconnected(config, "jobs_scan_needs_login");
         await notifyOperationalAlert("LinkedIn login required for jobs pipeline.", { command: "jobs:scan", status: "needs_login" });
         console.log(JSON.stringify(result, null, 2));
         return result;
@@ -3845,6 +4018,8 @@ async function runJobsApplyOne(identifier = process.argv[3]) {
   const config = loadConfig();
   const blocked = await skipIfProfileIncomplete("jobs", config);
   if (blocked) return blocked;
+  const disconnected = await skipIfLinkedInDisconnected("jobs", config);
+  if (disconnected) return disconnected;
   const withoutResume = await skipIfNoResume("jobs", config);
   if (withoutResume) return withoutResume;
   const paused = await skipIfPaused("jobs", config);
@@ -4031,6 +4206,12 @@ async function main() {
     await runGmailAuth();
   } else if (command === "gmail:test") {
     await runGmailTest();
+  } else if (command === "linkedin:login") {
+    await runLinkedInLogin();
+  } else if (command === "linkedin:status") {
+    await runLinkedInStatus();
+  } else if (command === "linkedin:logout") {
+    await runLinkedInLogout();
   } else if (command === "auth:status") {
     await runAuthStatus();
   } else if (command === "run:dm") {
