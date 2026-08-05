@@ -19,7 +19,7 @@ Copy only secrets already supported by the database into its existing `api_keys`
 
 One user LaunchAgent named `com.gabriel.linkedin-web-console` will run `npm run web` with `RunAtLoad` and `KeepAlive`. The web server's scheduler becomes the only pipeline coordinator.
 
-The old LaunchAgents will be unloaded but their plist files will remain on disk for rollback. The temporary terminal-hosted web process will be stopped before loading the persistent service so only one process can bind to `127.0.0.1:4321`.
+The old LaunchAgents will be unloaded, persistently disabled, and moved out of `~/Library/LaunchAgents` into a private rollback directory. This prevents macOS from loading them again after login or restart. Their plist files remain available for rollback. The temporary terminal-hosted web process will be stopped before loading the persistent service so only one process can bind to `127.0.0.1:4321`.
 
 ## Schedule configuration
 
@@ -66,24 +66,25 @@ The database, WAL, and shared-memory files are already mode `0600`; permissions 
 
 ## Cutover sequence
 
-1. Back up the complete three `pipeline_schedules` rows, the pre-cutover `pipeline_runs` count, and API-key metadata without secret values. Record the IDs of any keys inserted during migration.
-2. Verify that the Mac timezone is `America/Sao_Paulo` and that the cutover is not within five minutes of 09:00, 12:00, or 16:00. Abort before mutation if either precondition fails.
+1. Write a durable cutover recovery file under ignored local `data/` with mode `0600`. It contains the complete three `pipeline_schedules` rows, pre-cutover `pipeline_runs` count, old plist locations and labels, API-key metadata without secrets, inserted key IDs, and a phase marker updated after every step.
+2. Verify that the Mac timezone is `America/Sao_Paulo`. Abort before mutation if it differs.
 3. Resolve the process bound to port 4321 and verify its command and working directory belong to this project. Stop only that temporary `npm run web` process. Abort if another process owns the port.
-4. Unload the two old pipeline LaunchAgents. Require successful unload and verify that their labels, child Node/Playwright processes, and run lock are absent before continuing.
-5. In one SQLite transaction, copy supported API keys and replace all three schedules, including `mode=auto`, schedule kind, explicit times, weekdays, timezone, window, jitter, runtime markers, and status. Roll back the whole transaction on any error.
-6. Render and install the machine-specific web-console plist in `~/Library/LaunchAgents`.
-7. Load the web-console LaunchAgent.
-8. Verify the new service, port, schedules, next-run offset, key counts, file permissions, and unchanged `pipeline_runs` count after the first scheduler tick.
+4. Unload and persistently disable the two old pipeline LaunchAgents. Move their installed plists into a private rollback directory outside `~/Library/LaunchAgents`. Require successful unload and verify that their labels, child Node/Playwright processes, and run lock are absent before continuing.
+5. In one SQLite transaction, copy supported API keys and replace all three schedule definitions, but keep every schedule in `manual` mode with null runtime markers. Roll back the whole transaction on any error.
+6. Render and install the machine-specific web-console plist in `~/Library/LaunchAgents`, then load it.
+7. Verify the new service, port, scheduler health, desired schedule definitions, key counts, file permissions, and unchanged `pipeline_runs` count while every pipeline remains manual.
+8. In a final short transaction, change the three modes to `auto` and keep `next_run_at` null. On the next tick the healthy scheduler computes the next strictly future member of each explicit daily-time list; it cannot enqueue the current or a past slot.
+9. Wait through the first scheduler tick and verify future markers, five-minute phase, and unchanged `pipeline_runs` count. Mark the recovery file complete but preserve it for rollback audit.
 
-The database remains in manual mode while the temporary web process is alive, so no scheduler can observe partially migrated automatic schedules. The old agents are unloaded and verified before the short activation transaction. If the new service fails any critical verification, it is unloaded, the complete schedule snapshot is restored, inserted key IDs are removed, and the old agents are reloaded and revalidated from their preserved plist files.
+The database remains in manual mode until the persistent web service is healthy, so no scheduler can observe partially migrated automatic schedules. The old agents are unloaded, disabled, and moved before the final short activation transaction. If the new service fails any critical verification, it is unloaded, its installed plist is moved out of `~/Library/LaunchAgents`, the complete schedule snapshot is restored, inserted key IDs are removed, and the old plists are restored, re-enabled, reloaded, and revalidated. The durable phase file makes each recovery step idempotent after interruption or process death.
 
 ## Error handling and rollback
 
 - Database failure: roll back the transaction and reload the old LaunchAgents because they have already been unloaded at the activation stage.
 - Secret validation failure: skip only the invalid secret and report its provider/ordinal without its value.
 - Port conflict: stop a process only after proving it belongs to this project; otherwise abort without mutation.
-- Old-agent unload failure or surviving child/lock: abort and restore the previously loaded agents before any automatic database schedule is committed.
-- New service failure: unload it, restore the database snapshot, remove only keys inserted by this cutover, and reload the preserved old agents.
+- Old-agent unload failure or surviving child/lock: abort and restore/re-enable the previously loaded agents before any automatic database schedule is committed.
+- New service failure: unload it, remove its installed plist from `~/Library/LaunchAgents`, restore the database snapshot, remove only keys inserted by this cutover, and restore/re-enable/reload the preserved old agents.
 - Verification failure after a successful start: perform the same complete rollback, then report the exact failed invariant.
 - Timezone mismatch: abort. The scheduler uses the Mac's local timezone even though the row stores a timezone label.
 
@@ -98,3 +99,6 @@ The database remains in manual mode while the temporary web process is alive, so
 - Database, WAL, and SHM remain `0600`.
 - No pipeline run is added to `pipeline_runs` during cutover.
 - On rollback, the old LaunchAgents are loaded again and their previous operational state is verified.
+- The old installed plists are absent from `~/Library/LaunchAgents` during normal web-scheduler operation, and the new installed plist is absent after rollback.
+- A mode-`manual` health check occurs before activation, and the first automatic tick only computes strictly future markers.
+- The durable `0600` recovery file records a completed phase and is sufficient for idempotent rollback after interruption.
