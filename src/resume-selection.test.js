@@ -5,9 +5,12 @@ import { ensureResumeSelected, readResumeEntries } from "./resume-selection.js";
 /**
  * Stand-in for the Easy Apply résumé step.
  *
- * It models the three things the real page does that the flow depends on: cards
- * hidden behind an expand control, a select/unselect button whose accessible
- * name carries the filename, and a file input that adds a selected card.
+ * It models the three things the real page does that the flow depends on:
+ * cards hidden behind an expand control, a select/unselect radio input whose
+ * associated `<label>` carries the filename, and a file input that adds a
+ * selected card. LinkedIn's real markup is a `<label>`-wrapped
+ * `<input type="radio">`, not a button, so the stand-in exposes the same
+ * `evaluate`/`isChecked` shape the real code depends on.
  */
 function fakePage({ visible = [], hidden = [], selected = null, hasFileInput = true, uploadThrows = null } = {}) {
   const state = {
@@ -19,6 +22,17 @@ function fakePage({ visible = [], hidden = [], selected = null, hasFileInput = t
       return state.expanded ? [...visible, ...hidden] : [...visible];
     }
   };
+
+  const radio = (labelText, entry, onClick) => ({
+    labelText,
+    isVisible: async () => true,
+    count: async () => 1,
+    click: async () => { state.clicks.push(labelText); onClick?.(); },
+    isChecked: async () => state.selected === entry,
+    evaluate: async (fn) => fn({ labels: [{ innerText: labelText }] }),
+    getAttribute: async () => null,
+    innerText: async () => labelText
+  });
 
   const button = (name, onClick) => ({
     name,
@@ -50,12 +64,12 @@ function fakePage({ visible = [], hidden = [], selected = null, hasFileInput = t
     },
     getByRole: (role, { name }) => {
       const matches = [];
-      if (/selecionar|desmarcar/i.test(String(name)) || String(name).includes("resume")) {
+      if (role === "radio") {
         for (const entry of state.entries) {
           const isSelected = state.selected === entry;
           const label = `${isSelected ? "Desmarcar seleção de resume" : "Selecionar resume"} ${entry}`;
           if (name.test?.(label)) {
-            matches.push(button(label, () => { state.selected = entry; }));
+            matches.push(radio(label, entry, () => { state.selected = entry; }));
           }
         }
       } else if (name.test?.("+2 currículos") || name.test?.("Mostrar mais")) {
@@ -173,4 +187,35 @@ test("entries are read from the accessible name of the selection control", async
   assert.equal(entries.length, 1);
   assert.equal(entries[0].text, "Curriculo_Backend_2026.pdf", "o prefixo do rotulo precisa sair");
   assert.equal(entries[0].selected, true);
+});
+
+test("entries are read from Portuguese accessible names with 'currículo' or 'curriculo'", async () => {
+  const radio = (labelText, checked) => ({
+    isVisible: async () => true,
+    count: async () => 1,
+    click: async () => {},
+    isChecked: async () => checked,
+    evaluate: async (fn) => fn({ labels: [{ innerText: labelText }] }),
+    getAttribute: async () => null,
+    innerText: async () => labelText
+  });
+
+  const page = {
+    getByRole: (role, { name }) => {
+      if (role !== "radio") return { all: async () => [] };
+      const entries = [
+        { label: "Selecionar currículo Maria Oliveira - Software Engineer.docx", checked: false },
+        { label: "Desmarcar seleção de currículo Maria Oliveira - Senior Dev.pdf", checked: true }
+      ];
+      const matches = entries.filter((e) => name.test?.(e.label)).map((e) => radio(e.label, e.checked));
+      return { all: async () => matches };
+    }
+  };
+
+  const entries = await readResumeEntries(page);
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].text, "Maria Oliveira - Software Engineer.docx");
+  assert.equal(entries[0].selected, false);
+  assert.equal(entries[1].text, "Maria Oliveira - Senior Dev.pdf");
+  assert.equal(entries[1].selected, true);
 });

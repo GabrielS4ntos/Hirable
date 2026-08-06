@@ -31,22 +31,28 @@ export async function expandResumeList(page) {
 /**
  * Text of each résumé card in the expanded list.
  *
- * Read from the selection controls rather than from the page text, because the
- * accessible name of a "Selecionar resume X" button is the one place where the
- * entry's identity is unambiguous.
+ * Each card is a `<label>`-wrapped `<input type="radio">`, not a button — the
+ * accessible role LinkedIn exposes here is "radio", and the accessible name
+ * ("Selecionar resume X" / "Desmarcar seleção de resume X") comes from the
+ * associated `<label>` text, not from an aria-label on the input itself.
+ * `isChecked()` on the radio is the ground truth for selection; the label
+ * wording is only used to read the identity and as a fallback.
  */
 export async function readResumeEntries(page) {
   const entries = [];
   const controls = await page
-    .getByRole("button", { name: /(selecionar|desmarcar seleção de|select|unselect)\s+resume/i })
+    .getByRole("radio", { name: /(selecionar|desmarcar seleção de|select|unselect)\s+(resume|currículo|curriculo)/i })
     .all()
     .catch(() => []);
 
   for (const control of controls) {
-    const name = await control.getAttribute("aria-label").catch(() => null)
+    const name = await control.evaluate((el) => el.labels?.[0]?.innerText || "").catch(() => null)
+      || await control.getAttribute("aria-label").catch(() => null)
       || await control.innerText().catch(() => "");
-    const text = String(name).replace(/^(selecionar|desmarcar seleção de|select|unselect)\s+resume\s*/i, "").trim();
-    if (text) entries.push({ text, control, selected: /desmarcar|unselect/i.test(String(name)) });
+    const text = String(name).replace(/^(selecionar|desmarcar seleção de|select|unselect)\s+(resume|currículo|curriculo)\s*/i, "").trim();
+    const checked = await control.isChecked().catch(() => null);
+    const selected = checked !== null ? checked : /desmarcar|unselect/i.test(String(name));
+    if (text) entries.push({ text, control, selected });
   }
   return entries;
 }
@@ -79,7 +85,10 @@ export async function ensureResumeSelected(page, { displayName, filePath = null,
     if (entry.selected) {
       return { ok: true, confirmed: true, already_selected: true, matched_text: entry.text, resume_display_name: displayName, expanded_count: expandedCount };
     }
-    await entry.control.click({ timeout: 5000 }).catch(() => {});
+    // force: LinkedIn styles the radio itself invisible and shows the label
+    // as the clickable card, so a plain click can fail actionability checks
+    // on the input even though it is the element carrying the real state.
+    await entry.control.click({ timeout: 5000, force: true }).catch(() => {});
     await page.waitForTimeout(600);
     const verified = await verifyResumeSelected(page, displayName);
     return {
