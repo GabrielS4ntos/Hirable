@@ -4,6 +4,8 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { AppStore } from "./app-store.js";
+import { normalizeJobRecord } from "./agent-record.js";
+import { EDITABLE_BY_PATH } from "./config-defaults.js";
 
 function freshStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "integrations-"));
@@ -247,4 +249,33 @@ test("provider errors are redacted before reaching the interface", () => {
   } finally {
     cleanup();
   }
+});
+
+test("os campos novos do registro chegam ao cliente sem segredo junto", () => {
+  const record = normalizeJobRecord(
+    {
+      external_id: "1",
+      title: "Backend",
+      easy_apply: true,
+      work_mode: "remote",
+      posted_at: "2026-08-05T12:00:00.000Z",
+      external_apply_url: "https://acme.com/apply"
+    },
+    null,
+    { filterStage: "prefilter" }
+  );
+
+  for (const key of ["work_mode", "posted_at", "filter_stage", "blocked_until", "digested_at"]) {
+    assert.ok(key in record, key);
+  }
+  // The record is rendered client-side, so it must carry nothing but the job.
+  const serialized = JSON.stringify(record);
+  assert.doesNotMatch(serialized, /api[_-]?key|secret|token|client_secret/i);
+});
+
+test("as listas de bloqueio são editáveis e nenhuma delas é guard rail", () => {
+  // They configure taste, not disclosure: SAFETY must stay out of the surface.
+  assert.ok(EDITABLE_BY_PATH.has("jobs_watcher.blocked_companies"));
+  assert.ok(EDITABLE_BY_PATH.has("jobs_watcher.blocked_apply_domains"));
+  assert.ok(!EDITABLE_BY_PATH.has("security.stop_on_captcha"));
 });

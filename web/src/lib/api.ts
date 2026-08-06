@@ -37,6 +37,13 @@ export type AgentRecord = {
   send_error: string | null;
   analyzed_at: string;
   updated_at: string;
+  work_mode: "remote" | "hybrid" | "onsite" | "unknown";
+  posted_at: string | null;
+  // The layer that decided this record's fate. Typed as a union so the table can
+  // build its i18n key from it without widening t() to accept any string.
+  filter_stage: "" | "search" | "prefilter" | "enrichment" | "model" | "eligibility" | "cap";
+  blocked_until: string | null;
+  digested_at: string | null;
   raw: Record<string, unknown>;
 };
 
@@ -297,7 +304,7 @@ export type IntegrationsPayload = {
 export type ConfigField = {
   path: string;
   label: string;
-  type: "string" | "clock" | "int" | "boolean" | "searches" | "known_answers" | "string_map";
+  type: "string" | "clock" | "int" | "boolean" | "searches" | "known_answers" | "string_map" | "string_list";
   min?: number;
   max?: number;
   value: any;
