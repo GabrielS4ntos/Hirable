@@ -85,6 +85,11 @@ function baseRecord({ pipeline, kind, externalId }) {
     sent_at: null,
     sent_by: null,
     analyzed_at: new Date().toISOString(),
+    work_mode: "unknown",
+    posted_at: null,
+    filter_stage: "",
+    blocked_until: null,
+    digested_at: null,
     raw: {}
   };
 }
@@ -102,6 +107,12 @@ export function normalizeJobRecord(job, evaluation = null, context = {}) {
   record.title = cleanText(job.title) || `Vaga ${job.external_id}`;
   record.subtitle = cleanText(job.company);
   record.location = cleanText(job.location, 160);
+  // "unknown" rather than an empty string: the prefilter treats not-knowing as a
+  // decision of its own, and an empty string would read as a known blank.
+  record.work_mode = ["remote", "hybrid", "onsite", "unknown"].includes(job.work_mode) ? job.work_mode : "unknown";
+  record.posted_at = job.posted_at || null;
+  record.filter_stage = cleanText(context.filterStage, 40);
+  record.blocked_until = context.blockedUntil || null;
   record.url = cleanText(job.url, 2000);
   record.action_url = cleanText(job.apply_url || job.url, 2000);
   record.source = cleanText(job.search_name, 120);
@@ -139,6 +150,9 @@ export function normalizeJobRecord(job, evaluation = null, context = {}) {
       url: job.url,
       apply_url: job.apply_url,
       easy_apply: Boolean(job.easy_apply),
+      work_mode: record.work_mode,
+      posted_at: record.posted_at,
+      external_apply_url: job.external_apply_url || "",
       sponsored: Boolean(job.sponsored),
       applied: Boolean(job.applied),
       compact_text: cleanText(job.compact_text, 1200)

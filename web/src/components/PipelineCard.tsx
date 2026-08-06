@@ -181,7 +181,7 @@ export function PipelineCard({
 
       <CardContent className="space-y-5">
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             <Label>{c.mode}</Label>
             <Select value={draft.mode} onValueChange={(value) => update({ mode: value as ScheduleMode })}>
               <SelectTrigger>
@@ -198,7 +198,7 @@ export function PipelineCard({
             <p className="text-xs text-muted-foreground">{gateBlocked ? t("error.profile_incomplete") : modeHint}</p>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             <Label>{c.scheduleType}</Label>
             <Select
               value={draft.schedule_kind}
@@ -218,27 +218,29 @@ export function PipelineCard({
             </Select>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             <Label htmlFor={`${draft.pipeline}-start`}>{c.allowedWindow}</Label>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <Input
                 id={`${draft.pipeline}-start`}
                 type="time"
                 value={draft.window_start}
                 onChange={(event) => update({ window_start: event.target.value })}
                 disabled={draft.mode !== "auto"}
+                className="min-w-0 flex-1 px-1.5 font-mono text-xs"
               />
-              <span className="text-muted-foreground">—</span>
+              <span className="shrink-0 text-muted-foreground">—</span>
               <Input
                 type="time"
                 value={draft.window_end}
                 onChange={(event) => update({ window_end: event.target.value })}
                 disabled={draft.mode !== "auto"}
+                className="min-w-0 flex-1 px-1.5 font-mono text-xs"
               />
             </div>
           </div>
 
-          <div className="space-y-1.5">
+          <div className="min-w-0 space-y-1.5">
             <Label htmlFor={`${draft.pipeline}-jitter`}>{c.jitter}</Label>
             <Input
               id={`${draft.pipeline}-jitter`}

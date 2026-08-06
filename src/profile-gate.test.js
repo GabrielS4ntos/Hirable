@@ -13,7 +13,8 @@ function freshStore() {
 }
 
 const filled = {
-  identity: { full_name: "Alex Souza", email: "alex@example.com" }
+  identity: { full_name: "Alex Souza", email: "alex@example.com" },
+  professional: { target_roles: ["Backend Developer"] }
 };
 
 test("an empty profile closes the gate and names what is missing", () => {
@@ -21,6 +22,7 @@ test("an empty profile closes the gate and names what is missing", () => {
   assert.equal(gate.ready, false);
   assert.equal(gate.code, PROFILE_GATE_CODE);
   assert.ok(gate.missing.includes("identity.full_name"));
+  assert.ok(gate.missing.includes("professional.target_roles"));
   assert.ok(gate.reason);
 });
 

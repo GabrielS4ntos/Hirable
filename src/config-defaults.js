@@ -90,16 +90,23 @@ export const SAFETY = Object.freeze({
   ])
 });
 
-/** Hard ceilings a user preference may lower but never raise. */
+/**
+ * Hard ceilings a user preference may lower but never raise.
+ *
+ * Application volume is deliberately NOT here. These ceilings exist to bound
+ * what the agent *discloses* — SAFETY's territory — and how many conversations
+ * it touches. How many applications the user wants to send is their decision,
+ * so those limits are configurable, bounded only by the sanity ceiling on the
+ * `int` coercion, which is input validation against a slipped digit rather than
+ * a guard rail.
+ */
 export const HARD_LIMITS = Object.freeze({
-  max_easy_apply_per_run: 5,
-  max_easy_apply_per_day: 30,
-  max_easy_apply_per_week: 60,
   max_accepts_per_run: 100,
-  max_threads_to_scan: 50,
-  max_searches_per_run: 10,
-  max_jobs_per_search: 50
+  max_threads_to_scan: 50
 });
+
+/** Upper bound on a hand-typed number. Not a guard rail: a typo catcher. */
+const SANITY_CEILING = 500;
 
 export const DEFAULTS = {
   timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "America/Sao_Paulo",
@@ -187,11 +194,24 @@ export const DEFAULTS = {
     max_searches_per_run: 3,
     max_scrolls_per_search: 12,
     stop_after_stale_scrolls: 3,
-    max_minutes_per_search: 4,
-    history_days: 1,
-    max_easy_apply_per_run: 2,
+    max_easy_apply_per_run: 5,
     max_easy_apply_per_day: 20,
     max_easy_apply_per_week: 30,
+    // Horizon for the whole pipeline: feeds LinkedIn's f_TPR parameter, the
+    // prefilter's age check and the pruning of processed_jobs.
+    freshness_days: 7,
+    // The user's own lists. Unlike a heuristic in code, these are exact and
+    // editable in the interface, so a new bad actor costs no commit.
+    blocked_companies: [],
+    blocked_apply_domains: [],
+    // Resolving the external apply link may need a click, which registers an
+    // "apply click" in LinkedIn's telemetry. Off until the user opts in.
+    resolve_external_apply_url: false,
+    // A transient failure used to disqualify a job forever; now it rests.
+    quarantine_hours: 72,
+    // Time is the scarce resource, not the number of cards: this budgets the
+    // whole run rather than each search.
+    run_budget_minutes: 12,
     ai_form_filler_enabled: true,
     max_ai_form_fill_attempts: 3,
     max_easy_apply_steps: 12,
@@ -208,12 +228,6 @@ export const DEFAULTS = {
       minimum_score_margin: 0.05,
       max_input_chars: 500,
       max_candidates_per_field: 3
-    },
-    selection_thresholds: {
-      default_min_score: 70,
-      auto_apply_min_score: 86,
-      raise_threshold_when_matches_exceed: 25,
-      raised_auto_apply_min_score: 92
     },
     resume_display_names: {},
     known_answers: [],
@@ -262,16 +276,20 @@ export const EDITABLE = [
   { path: "jobs_watcher.read_only", type: "boolean", label: "Somente leitura (não se candidata)" },
   { path: "jobs_watcher.easy_apply_enabled", type: "boolean", label: "Easy Apply automático" },
   { path: "jobs_watcher.ai_form_filler_enabled", type: "boolean", label: "Preenchimento de formulário por IA" },
-  { path: "jobs_watcher.max_easy_apply_per_run", type: "int", min: 0, max: HARD_LIMITS.max_easy_apply_per_run, label: "Candidaturas por execução" },
-  { path: "jobs_watcher.max_easy_apply_per_day", type: "int", min: 0, max: HARD_LIMITS.max_easy_apply_per_day, label: "Candidaturas por dia" },
-  { path: "jobs_watcher.max_easy_apply_per_week", type: "int", min: 0, max: HARD_LIMITS.max_easy_apply_per_week, label: "Candidaturas por semana" },
-  { path: "jobs_watcher.max_jobs_per_search", type: "int", min: 1, max: HARD_LIMITS.max_jobs_per_search, label: "Vagas por busca" },
-  { path: "jobs_watcher.max_searches_per_run", type: "int", min: 1, max: HARD_LIMITS.max_searches_per_run, label: "Buscas por execução" },
-  { path: "jobs_watcher.selection_thresholds.default_min_score", type: "int", min: 0, max: 100, label: "Score mínimo" },
-  { path: "jobs_watcher.selection_thresholds.auto_apply_min_score", type: "int", min: 0, max: 100, label: "Score mínimo para candidatura automática" },
+  { path: "jobs_watcher.max_easy_apply_per_run", type: "int", min: 0, max: SANITY_CEILING, label: "Candidaturas por execução" },
+  { path: "jobs_watcher.max_easy_apply_per_day", type: "int", min: 0, max: SANITY_CEILING, label: "Candidaturas por dia" },
+  { path: "jobs_watcher.max_easy_apply_per_week", type: "int", min: 0, max: SANITY_CEILING, label: "Candidaturas por semana" },
+  { path: "jobs_watcher.max_jobs_per_search", type: "int", min: 1, max: 100, label: "Vagas por busca" },
+  { path: "jobs_watcher.max_searches_per_run", type: "int", min: 1, max: 20, label: "Buscas por execução" },
   { path: "jobs_watcher.searches", type: "searches", label: "Buscas de vagas" },
   { path: "jobs_watcher.known_answers", type: "known_answers", label: "Respostas conhecidas" },
   { path: "jobs_watcher.resume_display_names", type: "string_map", label: "Nomes dos currículos" },
+  { path: "jobs_watcher.freshness_days", type: "int", min: 1, max: 90, label: "Horizonte de vagas (dias)" },
+  { path: "jobs_watcher.quarantine_hours", type: "int", min: 1, max: 720, label: "Quarentena após falha (horas)" },
+  { path: "jobs_watcher.run_budget_minutes", type: "int", min: 1, max: 120, label: "Orçamento por execução (min)" },
+  { path: "jobs_watcher.resolve_external_apply_url", type: "boolean", label: "Resolver link externo de candidatura" },
+  { path: "jobs_watcher.blocked_companies", type: "string_list", label: "Empresas bloqueadas" },
+  { path: "jobs_watcher.blocked_apply_domains", type: "string_list", label: "Sites de candidatura bloqueados" },
 
   { path: "model_gate.writer_model", type: "string", label: "Modelo de redação" },
   { path: "model_gate.validator_model", type: "string", label: "Modelo validador" },
@@ -352,14 +370,35 @@ export function coerceEditable(path, value) {
       return text;
     }
 
+    case "string_list": {
+      if (!Array.isArray(value)) throw new Error(`${field.label}: envie uma lista`);
+      // Normalized here rather than in the interface, because the CLI and the
+      // API reach this path too and a list that only holds its shape in the UI
+      // is not normalized at all.
+      const seen = new Set();
+      const items = [];
+      for (const entry of value) {
+        const text = String(entry ?? "").trim().slice(0, 120);
+        if (!text) continue;
+        const key = text.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        items.push(text);
+      }
+      return items.slice(0, 200);
+    }
+
     case "searches": {
       if (!Array.isArray(value)) throw new Error(`${field.label}: envie uma lista`);
-      return value.slice(0, HARD_LIMITS.max_searches_per_run * 3).map((item, index) => {
-        const name = String(item?.name ?? "").trim().slice(0, 80) || `busca_${index + 1}`;
-        const url = String(item?.url ?? "").trim();
-        // Only LinkedIn job searches: this URL is navigated to by the browser.
+      return value.slice(0, 60).map((item, index) => {
+        const rawName = typeof item === "string" ? item : (item?.name ?? item?.title ?? "");
+        const name = String(rawName).trim().slice(0, 80) || `busca_${index + 1}`;
+        let url = typeof item === "object" && item?.url ? String(item.url).trim() : "";
+        if (!url || !/^https:\/\/(www\.)?linkedin\.com\/jobs\//i.test(url)) {
+          url = `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(name)}`;
+        }
         if (!/^https:\/\/(www\.)?linkedin\.com\/jobs\//i.test(url)) {
-          throw new Error(`${field.label}: "${name}" precisa de uma URL de busca de vagas do LinkedIn`);
+          throw new Error(`${field.label}: "${name}" precisa de uma URL ou nome de vaga válido`);
         }
         return { name, url: url.slice(0, 2000) };
       });

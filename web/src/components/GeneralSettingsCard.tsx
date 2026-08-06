@@ -1,11 +1,12 @@
 import * as React from "react";
-import { Loader2, Plus, Save, Search, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Loader2, Plus, Save, SlidersHorizontal, Trash2 } from "lucide-react";
 import { api, type ConfigField } from "@/lib/api";
 import { usePolling } from "@/hooks/usePolling";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -108,7 +109,7 @@ export function GeneralSettingsCard() {
 
             <div className="grid gap-4 sm:grid-cols-2">
               {groupFields.map((field) => {
-                const wide = field.type === "searches" || field.type === "known_answers" || field.type === "string_map";
+                const wide = field.type === "searches" || field.type === "known_answers" || field.type === "string_map" || field.type === "string_list";
                 return (
                   <div key={field.path} className={cn("space-y-1.5", wide && "sm:col-span-2")}>
                     <Label htmlFor={field.path} className="flex items-center gap-2">
@@ -132,9 +133,9 @@ export function GeneralSettingsCard() {
           <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
             {Boolean(valueOf(fields.find((field) => field.path === "pause.enabled")!))
               ? t(Boolean(valueOf(fields.find((field) => field.path === "pause.allow_manual_runs")!)) ? "pause.summaryAllowed" : "pause.summaryBlocked", {
-                  start: String(valueOf(fields.find((field) => field.path === "pause.start")!)),
-                  end: String(valueOf(fields.find((field) => field.path === "pause.end")!))
-                })
+                start: String(valueOf(fields.find((field) => field.path === "pause.start")!)),
+                end: String(valueOf(fields.find((field) => field.path === "pause.end")!))
+              })
               : t("pause.summaryDisabled")}
           </p>
         ) : null}
@@ -189,6 +190,9 @@ function ConfigControl({
     case "string_map":
       return <StringMapControl value={value || {}} onChange={onChange} t={t} />;
 
+    case "string_list":
+      return <StringListControl field={field} value={Array.isArray(value) ? value : []} onChange={onChange} t={t} />;
+
     default:
       return <Input id={field.path} value={value ?? ""} onChange={(event) => onChange(event.target.value)} />;
   }
@@ -203,38 +207,35 @@ function SearchesControl({
   onChange: (value: { name: string; url: string }[]) => void;
   t: Translate;
 }) {
-  const update = (index: number, patch: Partial<{ name: string; url: string }>) =>
-    onChange(value.map((item, position) => (position === index ? { ...item, ...patch } : item)));
+  const updateName = (index: number, name: string) => {
+    const trimmed = name.trim();
+    const url = trimmed ? `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(trimmed)}` : "";
+    onChange(value.map((item, position) => (position === index ? { name, url } : item)));
+  };
 
   return (
     <div className="space-y-2">
       {value.map((item, index) => (
-        <div key={index} className="flex flex-wrap items-start gap-2 rounded-md border border-border p-2">
+        <div key={index} className="flex items-center gap-2">
           <Input
             value={item.name}
-            onChange={(event) => update(index, { name: event.target.value })}
-            placeholder="nome_da_busca"
-            className="max-w-56 font-mono text-xs"
-          />
-          <Input
-            value={item.url}
-            onChange={(event) => update(index, { url: event.target.value })}
-            placeholder="https://www.linkedin.com/jobs/search-results/?keywords=…"
-            className="min-w-64 flex-1 font-mono text-xs"
+            onChange={(event) => updateName(index, event.target.value)}
+            placeholder={t("settings.searchPlaceholder")}
+            className="flex-1 text-sm"
           />
           <Button
             variant="ghost"
             size="icon"
             onClick={() => onChange(value.filter((_, position) => position !== index))}
-            className="text-muted-foreground hover:text-destructive"
-            aria-label={t("settings.removeSearch", { name: item.name })}
+            className="shrink-0 text-muted-foreground hover:text-destructive"
+            aria-label={t("settings.removeSearch", { name: item.name || String(index + 1) })}
           >
-            <Trash2 />
+            <Trash2 className="size-4" />
           </Button>
         </div>
       ))}
       <Button variant="outline" size="sm" onClick={() => onChange([...value, { name: "", url: "" }])}>
-        <Search />
+        <Plus className="size-4" />
         {t("settings.addSearch")}
       </Button>
     </div>
@@ -287,6 +288,38 @@ function KnownAnswersControl({
         <Plus />
         {t("settings.addAnswer")}
       </Button>
+    </div>
+  );
+}
+
+function StringListControl({
+  field,
+  value,
+  onChange,
+  t
+}: {
+  field: ConfigField;
+  value: string[];
+  onChange: (value: string[]) => void;
+  t: Translate;
+}) {
+  const isDomains = field.path === "jobs_watcher.blocked_apply_domains";
+
+  return (
+    <div className="space-y-1.5">
+      <Textarea
+        id={field.path}
+        rows={4}
+        value={value.join("\n")}
+        placeholder={isDomains ? "example-website.ai" : "example-website"}
+        // Split on save, join on load. The server coerces, trims and
+        // deduplicates, so the textarea never has to enforce shape — and the
+        // CLI reaches the same path without going through this component.
+        onChange={(event) => onChange(event.target.value.split("\n"))}
+      />
+      <p className="text-xs text-muted-foreground">
+        {t(isDomains ? "settings.blockedDomains.help" : "settings.blockedCompanies.help")}
+      </p>
     </div>
   );
 }

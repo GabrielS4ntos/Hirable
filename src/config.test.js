@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { AppStore } from "./app-store.js";
-import { DEFAULTS, EDITABLE_BY_PATH, HARD_LIMITS, SAFETY, coerceEditable, getPath, setPath } from "./config-defaults.js";
+import { DEFAULTS, EDITABLE, EDITABLE_BY_PATH, SAFETY, coerceEditable, getPath, setPath } from "./config-defaults.js";
 import { migratePauseConfigV1, resolveConfig } from "./config.js";
 
 function freshStore() {
@@ -69,22 +69,54 @@ test("only whitelisted paths are editable", () => {
   assert.ok(EDITABLE_BY_PATH.has("jobs_watcher.max_easy_apply_per_day"));
 });
 
-test("numeric settings are clamped to the hard ceiling", () => {
+test("numeric settings are clamped to the sanity ceiling", () => {
+  // Volume is the user's decision, so the ceiling here catches a slipped digit
+  // rather than enforcing a policy; the real guard rails live in SAFETY.
   assert.equal(coerceEditable("jobs_watcher.max_easy_apply_per_day", 10), 10);
-  assert.throws(() => coerceEditable("jobs_watcher.max_easy_apply_per_day", HARD_LIMITS.max_easy_apply_per_day + 1), /entre/);
+  assert.equal(coerceEditable("jobs_watcher.max_easy_apply_per_day", 40), 40);
+  assert.throws(() => coerceEditable("jobs_watcher.max_easy_apply_per_day", 5000), /entre/);
   assert.throws(() => coerceEditable("jobs_watcher.max_easy_apply_per_day", -1), /entre/);
   assert.throws(() => coerceEditable("jobs_watcher.max_easy_apply_per_day", "abc"), /num[eé]rico/);
 });
 
-test("job searches must be LinkedIn job URLs", () => {
+test("as novas chaves do pipeline de vagas têm padrão", () => {
+  const config = resolveConfig();
+  assert.equal(config.jobs_watcher.freshness_days, 7);
+  assert.deepEqual(config.jobs_watcher.blocked_companies, []);
+  assert.deepEqual(config.jobs_watcher.blocked_apply_domains, []);
+  assert.equal(config.jobs_watcher.resolve_external_apply_url, false);
+  assert.equal(config.jobs_watcher.quarantine_hours, 72);
+  assert.equal(config.jobs_watcher.run_budget_minutes, 12);
+});
+
+test("string_list normaliza, deduplica e descarta vazios", () => {
+  const value = coerceEditable("jobs_watcher.blocked_companies", ["  example-website ", "example-website", "", "Outra"]);
+  assert.deepEqual(value, ["example-website", "Outra"]);
+});
+
+test("string_list recusa o que não é lista", () => {
+  assert.throws(() => coerceEditable("jobs_watcher.blocked_apply_domains", "example-website.ai"), /lista/i);
+});
+
+test("SAFETY continua fora da superfície editável", () => {
+  for (const field of EDITABLE) {
+    assert.ok(!field.path.startsWith("security."), field.path);
+    assert.notEqual(field.path, "jobs_watcher.blocked_question_patterns");
+  }
+});
+
+test("job searches auto-build LinkedIn URLs from job names", () => {
   const valid = coerceEditable("jobs_watcher.searches", [
-    { name: "ai", url: "https://www.linkedin.com/jobs/search-results/?keywords=AI" }
+    { name: "ai", url: "https://www.linkedin.com/jobs/search-results/?keywords=AI" },
+    "Desenvolvedor Node.js",
+    { name: "Engenheiro Frontend" }
   ]);
   assert.equal(valid[0].name, "ai");
-
-  for (const url of ["https://evil.example.com/jobs/", "https://www.linkedin.com/feed/", "javascript:alert(1)", ""]) {
-    assert.throws(() => coerceEditable("jobs_watcher.searches", [{ name: "x", url }]), /LinkedIn/, url);
-  }
+  assert.equal(valid[0].url, "https://www.linkedin.com/jobs/search-results/?keywords=AI");
+  assert.equal(valid[1].name, "Desenvolvedor Node.js");
+  assert.equal(valid[1].url, "https://www.linkedin.com/jobs/search/?keywords=Desenvolvedor%20Node.js");
+  assert.equal(valid[2].name, "Engenheiro Frontend");
+  assert.equal(valid[2].url, "https://www.linkedin.com/jobs/search/?keywords=Engenheiro%20Frontend");
 });
 
 test("known answers reject an invalid regular expression", () => {

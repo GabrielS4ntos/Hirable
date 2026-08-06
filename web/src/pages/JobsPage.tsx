@@ -4,10 +4,10 @@ import { api, type AgentRecord, type RecordKind, type SendState } from "@/lib/ap
 import type { PageProps } from "@/lib/page";
 import { usePolling } from "@/hooks/usePolling";
 import {
-  SEND_STATE_VARIANTS,
   decisionLabel,
   sendStateLabel,
   formatDateTime,
+  formatRelative,
   isSendable,
   scoreTone,
   sendDisabledReason
@@ -175,7 +175,8 @@ export function JobsPage({ status }: PageProps) {
                 <TableHead className="min-w-64">{t("jobs.item")}</TableHead>
                 <TableHead className="w-20">{t("jobs.score")}</TableHead>
                 <TableHead className="w-28">{t("jobs.decision")}</TableHead>
-                <TableHead className="min-w-44">{t("jobs.state")}</TableHead>
+                <TableHead className="min-w-44">{t("jobs.location")}</TableHead>
+                <TableHead className="w-24">{t("jobs.postedAt")}</TableHead>
                 <TableHead className="w-32">{t("jobs.analyzed")}</TableHead>
                 <TableHead className="w-36 text-right">{t("jobs.action")}</TableHead>
               </TableRow>
@@ -183,7 +184,7 @@ export function JobsPage({ status }: PageProps) {
             <TableBody>
               {items.length === 0 && !records.loading ? (
                 <TableRow className="hover:bg-transparent">
-                  <TableCell colSpan={6} className="py-14 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={7} className="py-14 text-center text-sm text-muted-foreground">
                     {t("jobs.empty")}
                   </TableCell>
                 </TableRow>
@@ -203,8 +204,13 @@ export function JobsPage({ status }: PageProps) {
                       </button>
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                         {record.subtitle ? <span className="line-clamp-1">{record.subtitle}</span> : null}
-                        {record.location ? <span className="line-clamp-1">· {record.location}</span> : null}
                         {record.variant ? <Badge variant="outline">{record.variant}</Badge> : null}
+                        {record.work_mode && record.work_mode !== "unknown" ? (
+                          <Badge variant="outline">{t(`jobs.workMode.${record.work_mode}`)}</Badge>
+                        ) : null}
+                        {record.filter_stage ? (
+                          <Badge variant="secondary">{t(`jobs.filterStage.${record.filter_stage}`)}</Badge>
+                        ) : null}
                         {record.risk_flags.slice(0, 2).map((flag) => (
                           <Badge key={flag} variant="destructive" className="gap-1">
                             <ShieldAlert className="size-3" />
@@ -227,17 +233,12 @@ export function JobsPage({ status }: PageProps) {
                       <span className="text-sm">{decisionLabel(record.decision, t)}</span>
                     </TableCell>
 
-                    <TableCell>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <span className="inline-block">
-                            <Badge variant={SEND_STATE_VARIANTS[record.send_state]}>
-                              {sendStateLabel(record.send_state, t)}
-                            </Badge>
-                          </span>
-                        </TooltipTrigger>
-                        <TooltipContent>{disabledReason ?? t("jobs.sendPossible")}</TooltipContent>
-                      </Tooltip>
+                    <TableCell className="min-w-44 text-xs text-muted-foreground truncate">
+                      {record.location || "—"}
+                    </TableCell>
+
+                    <TableCell className="text-xs whitespace-nowrap text-muted-foreground tabular-nums">
+                      {record.posted_at ? formatRelative(record.posted_at, locale) : "—"}
                     </TableCell>
 
                     <TableCell className="text-xs whitespace-nowrap text-muted-foreground">

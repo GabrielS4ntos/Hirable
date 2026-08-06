@@ -123,3 +123,68 @@ export function renderAlertEmail({
 
   return { subject, text, html };
 }
+
+const DIGEST_HEADINGS = {
+  no_easy_apply: "Candidatura no site da empresa",
+  over_cap: "Não coube nesta execução",
+  quarantined: "Precisa de revisão",
+  enrichment_failed: "Anúncio não pôde ser lido"
+};
+
+/**
+ * The digest of what the pipeline could not send by itself.
+ *
+ * Every value here was scraped from a LinkedIn posting, so nothing reaches the
+ * markup without escaping — same rule as the alert template above.
+ *
+ * @param {object} options
+ * @param {Array<{job: object, category: string, reason: string}>} options.entries
+ * @returns {{subject: string, text: string, html: string}|null} null when there is nothing to send
+ */
+export function renderJobDigestEmail({ entries = [], consoleUrl = "http://127.0.0.1:4321" } = {}) {
+  if (!entries.length) return null;
+
+  const groups = new Map();
+  for (const entry of entries) {
+    if (!groups.has(entry.category)) groups.set(entry.category, []);
+    groups.get(entry.category).push(entry);
+  }
+
+  const date = new Date().toISOString().slice(0, 10);
+  const subject = `[Hirable] ${entries.length} vaga(s) para você · ${date}`;
+
+  const textBlocks = [];
+  const htmlBlocks = [];
+  for (const [category, items] of groups) {
+    const heading = DIGEST_HEADINGS[category] || category;
+    textBlocks.push(`## ${heading} (${items.length})`);
+    htmlBlocks.push(`<h2 style="margin:24px 0 8px;font-size:15px;color:#0f172a">${escapeHtml(heading)} (${items.length})</h2>`);
+
+    for (const { job, reason } of items) {
+      const link = job.external_apply_url || job.url || "";
+      textBlocks.push(`- ${job.title} — ${job.company}\n  ${link}\n  ${reason}`);
+      htmlBlocks.push(`<p style="margin:0 0 12px;font-size:13px;line-height:1.5">
+        <a href="${escapeHtml(link)}" style="color:#2563eb;font-weight:600;text-decoration:none">${escapeHtml(job.title)}</a>
+        <span style="color:#64748b"> · ${escapeHtml(job.company)}</span><br>
+        <span style="color:#94a3b8">${escapeHtml(reason)}</span>
+      </p>`);
+    }
+    textBlocks.push("");
+  }
+
+  return {
+    subject,
+    text: [...textBlocks, consoleUrl].join("\n"),
+    html: `<!doctype html>
+<html lang="pt-BR"><body style="margin:0;padding:24px;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif">
+  <table role="presentation" cellpadding="0" cellspacing="0" style="max-width:640px;margin:0 auto;background:#ffffff;border-radius:12px;border:1px solid #e2e8f0">
+    <tr><td style="padding:24px">
+      <h1 style="margin:0 0 4px;font-size:18px;color:#0f172a">Vagas que o agente não pôde enviar</h1>
+      <p style="margin:0 0 8px;font-size:13px;color:#64748b">Cada vaga traz o motivo de ter chegado até você.</p>
+      ${htmlBlocks.join("\n")}
+      <a href="${escapeHtml(consoleUrl)}" style="display:inline-block;margin-top:12px;padding:9px 16px;background:#0f172a;color:#ffffff;border-radius:8px;text-decoration:none;font-size:13px;font-weight:600">Abrir o console</a>
+    </td></tr>
+  </table>
+</body></html>`
+  };
+}

@@ -147,3 +147,31 @@ test("raw payload keeps the original job for the manual send flow", () => {
   assert.equal(record.raw.job.easy_apply, true);
   assert.equal(record.raw.job.apply_url, easyApplyJob.apply_url);
 });
+
+test("o registro de vaga carrega modalidade, data e a camada que decidiu", () => {
+  const record = normalizeJobRecord(
+    {
+      external_id: "77",
+      title: "Backend",
+      company: "Acme",
+      url: "https://www.linkedin.com/jobs/view/77/",
+      easy_apply: true,
+      work_mode: "remote",
+      posted_at: "2026-08-05T12:00:00.000Z"
+    },
+    null,
+    { filterStage: "prefilter", blockedUntil: "2026-08-09T12:00:00.000Z" }
+  );
+
+  assert.equal(record.work_mode, "remote");
+  assert.equal(record.posted_at, "2026-08-05T12:00:00.000Z");
+  assert.equal(record.filter_stage, "prefilter");
+  assert.equal(record.blocked_until, "2026-08-09T12:00:00.000Z");
+  assert.equal(record.digested_at, null);
+});
+
+test("modalidade ausente vira unknown em vez de string vazia", () => {
+  const record = normalizeJobRecord({ external_id: "78", title: "x", easy_apply: false }, null, {});
+  assert.equal(record.work_mode, "unknown");
+  assert.equal(record.posted_at, null);
+});

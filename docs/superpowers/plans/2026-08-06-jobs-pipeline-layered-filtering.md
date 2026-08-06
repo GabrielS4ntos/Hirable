@@ -560,7 +560,7 @@ import assert from "node:assert/strict";
 import { registrableDomain, matchesBlockedDomain } from "./apply-domain.js";
 
 test("normalizes the host", () => {
-  assert.equal(registrableDomain("https://WWW.Micro1.ai/jobs/123"), "micro1.ai");
+  assert.equal(registrableDomain("https://WWW.example-website.ai/jobs/123"), "example-website.ai");
   assert.equal(registrableDomain("http://boards.greenhouse.io/acme"), "boards.greenhouse.io");
 });
 
@@ -571,29 +571,29 @@ test("a URL that does not parse has no domain", () => {
 });
 
 test("blocks the domain and its subdomains", () => {
-  assert.equal(matchesBlockedDomain("https://micro1.ai/apply/9", ["micro1.ai"]), "micro1.ai");
-  assert.equal(matchesBlockedDomain("https://jobs.micro1.ai/apply/9", ["micro1.ai"]), "micro1.ai");
-  assert.equal(matchesBlockedDomain("https://www.micro1.ai/apply/9", ["micro1.ai"]), "micro1.ai");
+  assert.equal(matchesBlockedDomain("https://example-website.ai/apply/9", ["example-website.ai"]), "example-website.ai");
+  assert.equal(matchesBlockedDomain("https://jobs.example-website.ai/apply/9", ["example-website.ai"]), "example-website.ai");
+  assert.equal(matchesBlockedDomain("https://www.example-website.ai/apply/9", ["example-website.ai"]), "example-website.ai");
 });
 
 test("does not block a domain that merely contains the string", () => {
   // The reason this module exists: substring matching would block this.
-  assert.equal(matchesBlockedDomain("https://naomicro1.com.br/apply", ["micro1.ai"]), null);
-  assert.equal(matchesBlockedDomain("https://micro1.ai.example.com/apply", ["micro1.ai"]), null);
+  assert.equal(matchesBlockedDomain("https://naoexample-website.com.br/apply", ["example-website.ai"]), null);
+  assert.equal(matchesBlockedDomain("https://example-website.ai.example.com/apply", ["example-website.ai"]), null);
 });
 
 test("the blocked entry is normalized the same way as the URL", () => {
-  assert.equal(matchesBlockedDomain("https://micro1.ai/x", ["  HTTPS://WWW.Micro1.AI/  "]), "micro1.ai");
+  assert.equal(matchesBlockedDomain("https://example-website.ai/x", ["  HTTPS://WWW.example-website.AI/  "]), "example-website.ai");
 });
 
 test("an empty or missing list blocks nothing", () => {
-  assert.equal(matchesBlockedDomain("https://micro1.ai/x", []), null);
-  assert.equal(matchesBlockedDomain("https://micro1.ai/x", null), null);
+  assert.equal(matchesBlockedDomain("https://example-website.ai/x", []), null);
+  assert.equal(matchesBlockedDomain("https://example-website.ai/x", null), null);
 });
 
 test("an unresolvable URL is not blocked", () => {
   // Failing open is deliberate: these jobs are never sent automatically.
-  assert.equal(matchesBlockedDomain("", ["micro1.ai"]), null);
+  assert.equal(matchesBlockedDomain("", ["example-website.ai"]), null);
 });
 ```
 
@@ -611,8 +611,8 @@ Create `src/apply-domain.js`:
  * Denylist matching for the external application destination.
  *
  * Matching is on the host, by domain and subdomain — never by substring of the
- * URL. Substring matching would make an entry for "micro1.ai" also block
- * "naomicro1.com.br" and "micro1.ai.example.com", which is how a denylist turns
+ * URL. Substring matching would make an entry for "example-website.ai" also block
+ * "naoexample-website.com.br" and "example-website.ai.example.com", which is how a denylist turns
  * into a silent, unexplainable filter.
  */
 
@@ -661,8 +661,8 @@ rtk git add src/apply-domain.js src/apply-domain.test.js package.json && \
 rtk git commit -m "$(cat <<'EOF'
 Case a lista de bloqueio por domínio, não por substring
 
-Substring faria uma entrada "micro1.ai" bloquear também "naomicro1.com.br" e
-"micro1.ai.example.com" — é assim que uma lista de bloqueio vira um filtro
+Substring faria uma entrada "example-website.ai" bloquear também "naoexample-website.com.br" e
+"example-website.ai.example.com" — é assim que uma lista de bloqueio vira um filtro
 silencioso que ninguém consegue explicar.
 
 Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
@@ -798,8 +798,8 @@ test("unknown posting date promotes on the card and rejects once enriched", () =
 
 test("blocked company is rejected on the card, before any enrichment cost", () => {
   const context = baseContext();
-  context.config.jobs_watcher.blocked_companies = ["micro1"];
-  const result = prefilterJob(baseJob({ company: "Micro1 Inc" }), context, CARD);
+  context.config.jobs_watcher.blocked_companies = ["example-website"];
+  const result = prefilterJob(baseJob({ company: "example-website Inc" }), context, CARD);
   assert.equal(result.pass, false);
   assert.equal(result.code, "blocked_company");
   assert.equal(result.stage, FILTER_STAGES.PREFILTER);
@@ -807,8 +807,8 @@ test("blocked company is rejected on the card, before any enrichment cost", () =
 
 test("blocked apply domain is only evaluated once enriched", () => {
   const context = baseContext();
-  context.config.jobs_watcher.blocked_apply_domains = ["micro1.ai"];
-  const job = baseJob({ easy_apply: false, external_apply_url: "https://jobs.micro1.ai/9" });
+  context.config.jobs_watcher.blocked_apply_domains = ["example-website.ai"];
+  const job = baseJob({ easy_apply: false, external_apply_url: "https://jobs.example-website.ai/9" });
 
   assert.equal(prefilterJob(job, context, CARD).pass, true);
   const enriched = prefilterJob(job, context, ENRICHED);
@@ -843,8 +843,8 @@ test("a job without Easy Apply survives the prefilter so the digest can carry it
 
 test("every rejection carries a human-readable reason", () => {
   const context = baseContext();
-  context.config.jobs_watcher.blocked_companies = ["micro1"];
-  const result = prefilterJob(baseJob({ company: "Micro1" }), context, CARD);
+  context.config.jobs_watcher.blocked_companies = ["example-website"];
+  const result = prefilterJob(baseJob({ company: "example-website" }), context, CARD);
   assert.equal(typeof result.reason, "string");
   assert.ok(result.reason.length > 0);
 });
@@ -1031,12 +1031,12 @@ test("as novas chaves do pipeline de vagas têm padrão", () => {
 });
 
 test("string_list normaliza, deduplica e descarta vazios", () => {
-  const value = coerceEditable("jobs_watcher.blocked_companies", ["  Micro1 ", "micro1", "", "Outra"]);
-  assert.deepEqual(value, ["Micro1", "Outra"]);
+  const value = coerceEditable("jobs_watcher.blocked_companies", ["  example-website ", "example-website", "", "Outra"]);
+  assert.deepEqual(value, ["example-website", "Outra"]);
 });
 
 test("string_list recusa o que não é lista", () => {
-  assert.throws(() => coerceEditable("jobs_watcher.blocked_apply_domains", "micro1.ai"), /lista/i);
+  assert.throws(() => coerceEditable("jobs_watcher.blocked_apply_domains", "example-website.ai"), /lista/i);
 });
 
 test("o teto de candidatura é configurável, com limite de sanidade", () => {
@@ -1700,10 +1700,10 @@ test("extracts the external apply URL from the embedded JSON", () => {
     work_mode_label: "Remoto",
     posted_datetime: "",
     posted_label: "há 1 dia",
-    apply_url_json: '{"applyMethod":{"companyApplyUrl":"https://jobs.micro1.ai/9?src=li"}}'
+    apply_url_json: '{"applyMethod":{"companyApplyUrl":"https://jobs.example-website.ai/9?src=li"}}'
   }, NOW);
 
-  assert.equal(detail.external_apply_url, "https://jobs.micro1.ai/9?src=li");
+  assert.equal(detail.external_apply_url, "https://jobs.example-website.ai/9?src=li");
 });
 
 test("malformed embedded JSON yields no URL instead of throwing", () => {
@@ -2541,7 +2541,7 @@ function StringListControl({
         id={field.path}
         rows={4}
         value={value.join("\n")}
-        placeholder={field.path === "jobs_watcher.blocked_apply_domains" ? "micro1.ai" : "micro1"}
+        placeholder={field.path === "jobs_watcher.blocked_apply_domains" ? "example-website.ai" : "example-website"}
         // Split on save, join on load: the server coerces, deduplicates and
         // trims, so the textarea never has to be the one enforcing shape.
         onChange={(event) => onChange(event.target.value.split("\n"))}
