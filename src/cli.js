@@ -3962,6 +3962,9 @@ async function runJobsScan() {
     }
 
     // ---------------------------------------------------------- layer 2
+    // What gets persisted, keyed by job id. Enrichment replaces the card copy
+    // here so the record carries the best data the run ever had about the job.
+    const byId = new Map(allJobs.map((job) => [job.external_id, job]));
     const filterBreakdown = {};
     const countRejection = (code) => { filterBreakdown[code] = (filterBreakdown[code] || 0) + 1; };
     const promoted = [];
@@ -3994,6 +3997,10 @@ async function runJobsScan() {
 
       const detailed = await enrichJob(page, job, config);
       enrichedSample++;
+      // enrichJob returns a NEW object, so without this the card copy is what
+      // gets persisted and every layer-3 reason — the real work mode, the
+      // posting date, why it was rejected — never reaches the table.
+      byId.set(job.external_id, detailed);
       // Layer 1 promised remote when f_WT was set; a posting that says otherwise
       // is either a self-contradicting ad or a parameter that stopped working.
       if (job.work_mode === "remote" && detailed.work_mode !== "remote" && detailed.work_mode !== "unknown") {
@@ -4126,7 +4133,7 @@ async function runJobsScan() {
       await page.waitForTimeout(1500);
     }
 
-    await persistScannedJobRecords(allJobs, applicationResults, config, state, profile);
+    await persistScannedJobRecords(Array.from(byId.values()), applicationResults, config, state, profile);
 
     // processed_jobs is rewritten whole on every run, so it cannot grow forever.
     // Past twice the freshness horizon an entry decides nothing.
@@ -4157,7 +4164,7 @@ async function runJobsScan() {
     }
     if (emailState.enabled && emailState.settings?.job_digest_enabled && resumeGate.ready) {
       // Richest copy first: selectDigestJobs keeps the first entry per job id.
-      const entries = selectDigestJobs([...enriched, ...overCapJobs, ...promoted, ...allJobs]);
+      const entries = selectDigestJobs(Array.from(byId.values()));
       const rendered = renderJobDigestEmail({ entries });
       if (rendered) {
         await sendGmail({
