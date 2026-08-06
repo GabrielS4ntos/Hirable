@@ -144,3 +144,24 @@ test("picks the posting phrase out of a noisy list", () => {
 test("a posting phrase without an age is not a date", () => {
   assert.equal(findPostedLabel(["Anunciada recentemente"]), "");
 });
+
+test("counts a spelled-out article as one, in both languages", () => {
+  // LinkedIn writes the singular without a digit: "Posted a week ago",
+  // "an hour ago", "há uma semana". Requiring \d+ silently dropped the date and
+  // the job was then rejected as undated — over-rejection, not safety.
+  assert.equal(parsePostedAt(null, "Posted a week ago", NOW), "2026-07-30T12:00:00.000Z");
+  assert.equal(parsePostedAt(null, "Reposted an hour ago", NOW), "2026-08-06T11:00:00.000Z");
+  assert.equal(parsePostedAt(null, "Anunciada há uma semana", NOW), "2026-07-30T12:00:00.000Z");
+  assert.equal(parsePostedAt(null, "Publicado há um dia", NOW), "2026-08-05T12:00:00.000Z");
+});
+
+test("the article form is recognised as a posting phrase too", () => {
+  assert.equal(findPostedLabel(["Posted a week ago"]), "Posted a week ago");
+  assert.equal(findPostedLabel(["Anunciada há uma semana"]), "Anunciada há uma semana");
+});
+
+test("an article without a unit is still not a date", () => {
+  // "a" and "an" are far too common to treat as a quantity on their own.
+  assert.equal(findPostedLabel(["Posted a job"]), "");
+  assert.equal(parsePostedAt(null, "Posted a job", NOW), null);
+});

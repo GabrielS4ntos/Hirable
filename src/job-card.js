@@ -59,11 +59,16 @@ export function parsePostedAt(datetimeAttribute, label, now = new Date()) {
   if (/\b(hoje|today)\b/i.test(text)) return new Date(now.getTime()).toISOString();
   if (/\b(ontem|yesterday)\b/i.test(text)) return new Date(now.getTime() - 86400000).toISOString();
 
-  const amount = Number(/(\d+)/.exec(text)?.[1]);
-  if (!Number.isFinite(amount)) return null;
-
   const unit = UNITS.find((item) => item.pattern.test(text));
   if (!unit) return null;
+
+  // The article counts as one only when it sits right before the unit, so
+  // "Posted a job" stays undated while "Posted a week ago" resolves.
+  const digits = /(\d+)/.exec(text)?.[1];
+  const amount = digits !== undefined
+    ? Number(digits)
+    : (AGE_PHRASE.test(text) ? 1 : NaN);
+  if (!Number.isFinite(amount)) return null;
 
   return new Date(now.getTime() - amount * unit.ms).toISOString();
 }
@@ -78,7 +83,18 @@ export function parsePostedAt(datetimeAttribute, label, now = new Date()) {
  * names are obfuscated hashes, so the phrase is the only stable anchor.
  */
 const POSTED_VERB = /\b(anunciada|anunciado|publicada|publicado|posted|reposted)\b/i;
-const AGE_PHRASE = /\d+\s*(minuto|hora|dia|semana|m[êe]s|mes|ano|minute|hour|day|week|month|year)|\b(hoje|today|ontem|yesterday)\b/i;
+
+/**
+ * A quantity is a digit or a spelled-out article.
+ *
+ * LinkedIn writes the singular without a number — "Posted a week ago",
+ * "an hour ago", "Anunciada há uma semana" — so requiring \d+ silently dropped
+ * the date and the job was then rejected as undated. The article only counts
+ * immediately before a time unit: "a" and "an" are far too common otherwise.
+ */
+const QUANTITY = "(?:\\d+|\\b(?:an?|um|uma)\\b)";
+const TIME_UNIT = "(?:minuto|hora|dia|semana|m[êe]s|mes|ano|minute|hour|day|week|month|year)";
+const AGE_PHRASE = new RegExp(`${QUANTITY}\\s*${TIME_UNIT}|\\b(hoje|today|ontem|yesterday)\\b`, "i");
 
 /**
  * @param {string[]} candidates  visible strings scraped from the card or page
