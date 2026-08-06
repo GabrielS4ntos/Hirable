@@ -6,7 +6,7 @@
  * input, and a browser is not fixed input.
  */
 
-import { parseWorkMode, parsePostedAt } from "./job-card.js";
+import { parseWorkMode, parsePostedAt, findPostedLabel } from "./job-card.js";
 
 /** Enough for the model to judge alignment without paying for a whole page of boilerplate. */
 const MAX_DESCRIPTION_CHARS = 8000;
@@ -41,7 +41,7 @@ export function parseJobDetail(detail, now = new Date()) {
 
   return {
     work_mode: workMode,
-    posted_at: parsePostedAt(detail?.posted_datetime, detail?.posted_label, now),
+    posted_at: parsePostedAt(detail?.posted_datetime, detail?.posted_label || findPostedLabel(detail?.posted_candidates), now),
     description: body.slice(0, MAX_DESCRIPTION_CHARS),
     external_apply_url: externalApplyUrl
   };

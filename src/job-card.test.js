@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseWorkMode, parsePostedAt, normalizeJobCard } from "./job-card.js";
+import { parseWorkMode, parsePostedAt, normalizeJobCard, findPostedLabel } from "./job-card.js";
 
 const NOW = new Date("2026-08-06T12:00:00.000Z");
 
@@ -85,4 +85,62 @@ test("falls back to the card text when there is no work mode badge", () => {
 
 test("a card with no id is rejected", () => {
   assert.equal(normalizeJobCard({ title: "Dev" }, { searchName: "x", now: NOW }), null);
+});
+
+test("reads the posting age out of a metadata phrase, not just a <time> element", () => {
+  // LinkedIn renders the age as an ordinary span on most cards; relying on
+  // <time> alone left two thirds of a real scan with no date at all.
+  assert.equal(parsePostedAt(null, "Publicada há 2 dias", NOW), "2026-08-04T12:00:00.000Z");
+  assert.equal(parsePostedAt(null, "Reposted 3 days ago", NOW), "2026-08-03T12:00:00.000Z");
+  assert.equal(parsePostedAt(null, "Anunciada há 1 semana", NOW), "2026-07-30T12:00:00.000Z");
+});
+
+test("today and yesterday are dates, not unknowns", () => {
+  assert.equal(parsePostedAt(null, "hoje", NOW), "2026-08-06T12:00:00.000Z");
+  assert.equal(parsePostedAt(null, "today", NOW), "2026-08-06T12:00:00.000Z");
+  assert.equal(parsePostedAt(null, "ontem", NOW), "2026-08-05T12:00:00.000Z");
+  assert.equal(parsePostedAt(null, "yesterday", NOW), "2026-08-05T12:00:00.000Z");
+});
+
+test("a card carries the age found in its metadata", () => {
+  const card = normalizeJobCard({
+    external_id: "55",
+    url: "https://www.linkedin.com/jobs/view/55/",
+    title: "Dev",
+    company: "Acme",
+    posted_label: "Publicada há 4 dias",
+    text: "Dev Acme"
+  }, { searchName: "x", now: NOW });
+
+  assert.equal(card.posted_at, "2026-08-02T12:00:00.000Z");
+});
+
+test("only a posting phrase counts as a date, never a stray age", () => {
+  // Real page text. "A empresa leva geralmente 1 semana para avaliar" is the
+  // company's response speed, and matching it produced a fabricated date.
+  assert.equal(findPostedLabel(["A empresa leva geralmente 1 semana para avaliar as candidaturas"]), "");
+  assert.equal(findPostedLabel(["há 6 minutos"]), "");
+  assert.equal(findPostedLabel(["Visualizado", "Candidatura simplificada"]), "");
+});
+
+test("finds the posting phrase in both languages", () => {
+  assert.equal(findPostedLabel(["Anunciada há 2 dias"]), "Anunciada há 2 dias");
+  assert.equal(findPostedLabel(["Publicada há 3 semanas"]), "Publicada há 3 semanas");
+  assert.equal(findPostedLabel(["Posted 4 days ago"]), "Posted 4 days ago");
+  assert.equal(findPostedLabel(["Reposted 1 week ago"]), "Reposted 1 week ago");
+});
+
+test("picks the posting phrase out of a noisy list", () => {
+  const found = findPostedLabel([
+    "Promovida",
+    "A empresa leva geralmente 1 semana para avaliar as candidaturas",
+    "Anunciada há 2 dias",
+    "há 2 dias"
+  ]);
+  assert.equal(found, "Anunciada há 2 dias");
+  assert.equal(parsePostedAt(null, found, NOW), "2026-08-04T12:00:00.000Z");
+});
+
+test("a posting phrase without an age is not a date", () => {
+  assert.equal(findPostedLabel(["Anunciada recentemente"]), "");
 });

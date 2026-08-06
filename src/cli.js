@@ -2728,6 +2728,14 @@ async function extractJobsFromPage(page, searchName, config, context) {
           .map((node) => clean(node.innerText || node.textContent || ""))
           .filter(Boolean);
         const workModeText = /remoto|remote|presencial|h[íi]brido|hybrid|on-?site/i;
+        // The search card carries no posting date at all: no <time>, and the
+        // only dated text on it is "A empresa leva geralmente 1 semana para
+        // avaliar", which is the company's response speed. Matching that would
+        // fabricate a date, so the card reports the phrases and lets
+        // findPostedLabel decide — which, for a card, is almost always nothing.
+        const posted = Array.from(card.querySelectorAll("span, div, li"))
+          .map((node) => clean(node.innerText || node.textContent || ""))
+          .filter((item) => item && item.length < 80);
 
         out.push({
           external_id: externalId,
@@ -2738,6 +2746,7 @@ async function extractJobsFromPage(page, searchName, config, context) {
           location: metadata.find((item) => /,/.test(item) || workModeText.test(item)) || "",
           work_mode_label: metadata.find((item) => workModeText.test(item)) || "",
           posted_datetime: time?.getAttribute("datetime") || "",
+          posted_candidates: posted.slice(0, 40),
           posted_label: clean(time?.innerText || time?.textContent || ""),
           easy_apply: /easy apply|candidatura simplificada/i.test(text),
           applied: /applied|candidatou-se|candidatou/i.test(text),
@@ -2805,7 +2814,15 @@ async function enrichJob(page, job, config) {
       const badges = Array.from(document.querySelectorAll("[class*='job-details'] li, [class*='preferences'] span, [class*='workplace']"))
         .map((node) => clean(node.innerText || node.textContent || ""))
         .filter(Boolean);
+      // Class names on this page are obfuscated hashes, so the visible phrase
+      // is the only stable anchor; findPostedLabel picks the real one.
+      const postedCandidates = Array.from(document.querySelectorAll("span, div, li"))
+        .map((node) => clean(node.innerText || node.textContent || ""))
+        .filter((item) => item && item.length < 80)
+        .slice(0, 200);
+
       return {
+        posted_candidates: postedCandidates,
         body_text: clean(document.querySelector("[class*='description__text'], article, main")?.innerText || ""),
         work_mode_label: badges.find((item) => /remoto|remote|presencial|h[íi]brido|hybrid|on-?site/i.test(item)) || "",
         posted_datetime: time?.getAttribute("datetime") || "",

@@ -55,6 +55,10 @@ export function parsePostedAt(datetimeAttribute, label, now = new Date()) {
   const text = String(label || "").trim();
   if (!text) return null;
 
+  // Neither of these carries a number, so the unit scan below would miss them.
+  if (/\b(hoje|today)\b/i.test(text)) return new Date(now.getTime()).toISOString();
+  if (/\b(ontem|yesterday)\b/i.test(text)) return new Date(now.getTime() - 86400000).toISOString();
+
   const amount = Number(/(\d+)/.exec(text)?.[1]);
   if (!Number.isFinite(amount)) return null;
 
@@ -62,6 +66,31 @@ export function parsePostedAt(datetimeAttribute, label, now = new Date()) {
   if (!unit) return null;
 
   return new Date(now.getTime() - amount * unit.ms).toISOString();
+}
+
+/**
+ * Text that states when the vacancy was posted.
+ *
+ * The verb is required, not optional. LinkedIn's card and detail page are full
+ * of unrelated ages — "A empresa leva geralmente 1 semana para avaliar" is the
+ * company's response speed, and matching a bare age against it produced a
+ * fabricated posting date that then decided the freshness filter. The class
+ * names are obfuscated hashes, so the phrase is the only stable anchor.
+ */
+const POSTED_VERB = /\b(anunciada|anunciado|publicada|publicado|posted|reposted)\b/i;
+const AGE_PHRASE = /\d+\s*(minuto|hora|dia|semana|m[êe]s|mes|ano|minute|hour|day|week|month|year)|\b(hoje|today|ontem|yesterday)\b/i;
+
+/**
+ * @param {string[]} candidates  visible strings scraped from the card or page
+ * @returns {string}  the posting phrase, or "" when none of them is one
+ */
+export function findPostedLabel(candidates) {
+  for (const candidate of candidates || []) {
+    const text = String(candidate || "").trim();
+    if (text.length > 80) continue;
+    if (POSTED_VERB.test(text) && AGE_PHRASE.test(text)) return text;
+  }
+  return "";
 }
 
 function clean(value, limit = 300) {
@@ -96,7 +125,7 @@ export function normalizeJobCard(raw, { searchName = "", now = new Date() } = {}
     company: clean(raw?.company, 200),
     location: clean(raw?.location, 160),
     work_mode: workMode,
-    posted_at: parsePostedAt(raw?.posted_datetime, raw?.posted_label, now),
+    posted_at: parsePostedAt(raw?.posted_datetime, raw?.posted_label || findPostedLabel(raw?.posted_candidates), now),
     easy_apply: Boolean(raw?.easy_apply),
     applied: Boolean(raw?.applied),
     sponsored: Boolean(raw?.sponsored),

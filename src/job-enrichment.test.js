@@ -75,3 +75,33 @@ test("an empty detail yields unknowns rather than throwing", () => {
   assert.equal(detail.description, "");
   assert.equal(detail.external_apply_url, "");
 });
+
+test("takes the posting date from the page's phrases when there is no <time>", () => {
+  // The detail page's class names are obfuscated hashes, so the phrase is the
+  // anchor — and the company-speed insight must not be mistaken for it.
+  const detail = parseJobDetail({
+    body_text: "Vaga remota.",
+    work_mode_label: "Remoto",
+    posted_datetime: "",
+    posted_label: "",
+    posted_candidates: [
+      "Promovida",
+      "A empresa leva geralmente 1 semana para avaliar as candidaturas",
+      "Anunciada há 2 dias",
+      "há 2 dias"
+    ],
+    apply_url_json: ""
+  }, NOW);
+
+  assert.equal(detail.posted_at, "2026-08-04T12:00:00.000Z");
+});
+
+test("a page with no posting phrase yields no date rather than a guess", () => {
+  const detail = parseJobDetail({
+    body_text: "Vaga remota.",
+    work_mode_label: "Remoto",
+    posted_candidates: ["A empresa leva geralmente 1 semana para avaliar as candidaturas"],
+    apply_url_json: ""
+  }, NOW);
+  assert.equal(detail.posted_at, null);
+});
