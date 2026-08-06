@@ -194,7 +194,6 @@ export const DEFAULTS = {
     max_searches_per_run: 3,
     max_scrolls_per_search: 12,
     stop_after_stale_scrolls: 3,
-    max_minutes_per_search: 4,
     max_easy_apply_per_run: 5,
     max_easy_apply_per_day: 20,
     max_easy_apply_per_week: 30,
