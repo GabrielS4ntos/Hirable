@@ -154,10 +154,22 @@ export class AppStore {
         send_error TEXT,
         analyzed_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
+        work_mode TEXT NOT NULL DEFAULT 'unknown',
+        posted_at TEXT,
+        -- Which filtering layer decided this record's fate. Without it the user
+        -- only sees a vacancy disappear, which is the opacity the layered
+        -- filter exists to remove.
+        filter_stage TEXT NOT NULL DEFAULT '',
+        blocked_until TEXT,
+        digested_at TEXT,
         raw_json TEXT NOT NULL DEFAULT '{}'
       );
       CREATE INDEX IF NOT EXISTS idx_agent_records_listing ON agent_records(kind, send_state, analyzed_at DESC);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_records_identity ON agent_records(pipeline, kind, external_id);
+      -- The quarantine index is NOT created here. On an existing install this
+      -- block's CREATE TABLE is a no-op, so blocked_until does not exist yet and
+      -- indexing it would fail before the migration below could add it.
+      -- #migrateAgentRecordColumns creates it after the ADD COLUMN.
 
       CREATE TABLE IF NOT EXISTS app_settings (
         key TEXT PRIMARY KEY,
@@ -271,6 +283,7 @@ export class AppStore {
     `);
     this.#migrateApiKeyProviders();
     this.#migrateNotificationColumns();
+    this.#migrateAgentRecordColumns();
     try { fs.chmodSync(databasePath, 0o600); } catch { }
     this.ensureDefaultSchedules();
   }
@@ -330,6 +343,29 @@ export class AppStore {
     for (const [name, definition] of additions) {
       if (!columns.has(name)) this.db.exec(`ALTER TABLE notification_settings ADD COLUMN ${name} ${definition}`);
     }
+  }
+
+  /**
+   * Adds the layered-filter columns to an existing install.
+   *
+   * Plain ADD COLUMN with defaults, so an upgraded database keeps every record
+   * it already had instead of losing the send history behind them.
+   */
+  #migrateAgentRecordColumns() {
+    const columns = new Set(
+      this.db.prepare("PRAGMA table_info(agent_records)").all().map((row) => row.name)
+    );
+    const additions = [
+      ["work_mode", "TEXT NOT NULL DEFAULT 'unknown'"],
+      ["posted_at", "TEXT"],
+      ["filter_stage", "TEXT NOT NULL DEFAULT ''"],
+      ["blocked_until", "TEXT"],
+      ["digested_at", "TEXT"]
+    ];
+    for (const [name, definition] of additions) {
+      if (!columns.has(name)) this.db.exec(`ALTER TABLE agent_records ADD COLUMN ${name} ${definition}`);
+    }
+    this.db.exec("CREATE INDEX IF NOT EXISTS idx_agent_records_quarantine ON agent_records(pipeline, blocked_until)");
   }
 
   close() {
@@ -915,8 +951,9 @@ export class AppStore {
         record_id, pipeline, kind, external_id, title, subtitle, location, url, action_url,
         source, score, decision, confidence, risk_flags_json, reason, variant, status,
         send_method, send_state, send_blocked_reason, sent_at, sent_by, send_error,
-        analyzed_at, updated_at, raw_json
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        analyzed_at, updated_at, work_mode, posted_at, filter_stage, blocked_until,
+        digested_at, raw_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(record_id) DO UPDATE SET
         title = excluded.title,
         subtitle = excluded.subtitle,
@@ -938,6 +975,13 @@ export class AppStore {
         sent_by = excluded.sent_by,
         analyzed_at = excluded.analyzed_at,
         updated_at = excluded.updated_at,
+        work_mode = excluded.work_mode,
+        posted_at = excluded.posted_at,
+        filter_stage = excluded.filter_stage,
+        blocked_until = excluded.blocked_until,
+        -- A later scan does not know about the digest, so it must not be able to
+        -- make an already delivered email look pending again.
+        digested_at = COALESCE(excluded.digested_at, agent_records.digested_at),
         raw_json = excluded.raw_json
     `).run(
       record.record_id, record.pipeline, record.kind, record.external_id,
@@ -957,6 +1001,11 @@ export class AppStore {
       existing ? existing.send_error : null,
       record.analyzed_at || timestamp,
       timestamp,
+      record.work_mode || "unknown",
+      record.posted_at || null,
+      record.filter_stage || "",
+      record.blocked_until || null,
+      record.digested_at || null,
       JSON.stringify(record.raw || {}).slice(0, 200000)
     );
     return record.record_id;
@@ -986,6 +1035,31 @@ export class AppStore {
     ).all(...params, safeLimit, safeOffset);
     const total = this.db.prepare(`SELECT COUNT(*) AS total FROM agent_records ${where}`).get(...params);
     return { items: rows.map(mapAgentRecordRow), total: Number(total?.total || 0) };
+  }
+
+  /** Stamps the digest send so a job is not emailed again for the same reason. */
+  markRecordsDigested(recordIds, at) {
+    const ids = (recordIds || []).map((id) => String(id)).filter(Boolean);
+    if (!ids.length) return 0;
+    const statement = this.db.prepare("UPDATE agent_records SET digested_at = ?, updated_at = ? WHERE record_id = ?");
+    const timestamp = nowIso();
+    let changed = 0;
+    for (const id of ids) changed += Number(statement.run(at, timestamp, id).changes || 0);
+    return changed;
+  }
+
+  /**
+   * external_id -> blocked_until, for the quarantine entries still in the future.
+   *
+   * A transient failure used to disqualify a vacancy forever, because the
+   * tombstone in state.jobs.needs_review never expired. This is that tombstone
+   * with an end date.
+   */
+  listQuarantine(pipeline) {
+    const rows = this.db.prepare(
+      "SELECT external_id, blocked_until FROM agent_records WHERE pipeline = ? AND blocked_until IS NOT NULL AND blocked_until > ?"
+    ).all(String(pipeline), nowIso());
+    return new Map(rows.map((row) => [String(row.external_id), row.blocked_until]));
   }
 
   agentRecordCounts(kind = null) {
@@ -1528,6 +1602,11 @@ function mapAgentRecordRow(row) {
     send_error: row.send_error,
     analyzed_at: row.analyzed_at,
     updated_at: row.updated_at,
+    work_mode: row.work_mode || "unknown",
+    posted_at: row.posted_at,
+    filter_stage: row.filter_stage || "",
+    blocked_until: row.blocked_until,
+    digested_at: row.digested_at,
     raw: safeParse(row.raw_json) || {}
   };
 }

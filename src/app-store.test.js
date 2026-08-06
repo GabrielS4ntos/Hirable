@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { DatabaseSync } from "node:sqlite";
 import { AppStore, PIPELINE_IDS, maskSecret, normalizeDailyTimes, normalizeWeekdays } from "./app-store.js";
 import { normalizeJobRecord } from "./agent-record.js";
 
@@ -509,5 +510,147 @@ test("records are paged the same way, with the same guarantees", () => {
     assert.deepEqual(store.listAgentRecords({ kind: "job", limit: 4, offset: 8 }).items.length, 1);
   } finally {
     cleanup();
+  }
+});
+
+test("as colunas novas de agent_records sobrevivem ao round-trip", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.upsertAgentRecord({
+      record_id: "abc", pipeline: "jobs", kind: "job", external_id: "1",
+      title: "Backend", send_method: "easy_apply", send_state: "available",
+      work_mode: "remote", posted_at: "2026-08-05T12:00:00.000Z",
+      filter_stage: "prefilter", blocked_until: null, digested_at: null, raw: {}
+    });
+
+    const record = store.getAgentRecord("abc");
+    assert.equal(record.work_mode, "remote");
+    assert.equal(record.posted_at, "2026-08-05T12:00:00.000Z");
+    assert.equal(record.filter_stage, "prefilter");
+  } finally {
+    cleanup();
+  }
+});
+
+test("markRecordsDigested carimba só os ids informados", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    for (const id of ["a", "b"]) {
+      store.upsertAgentRecord({
+        record_id: id, pipeline: "jobs", kind: "job", external_id: id,
+        title: id, send_method: "external", send_state: "unsupported", raw: {}
+      });
+    }
+
+    assert.equal(store.markRecordsDigested(["a"], "2026-08-06T12:00:00.000Z"), 1);
+    assert.equal(store.getAgentRecord("a").digested_at, "2026-08-06T12:00:00.000Z");
+    assert.equal(store.getAgentRecord("b").digested_at, null);
+  } finally {
+    cleanup();
+  }
+});
+
+test("uma varredura posterior não apaga o carimbo do digest", () => {
+  // A later scan knows nothing about the digest; letting it clear the stamp
+  // would make an already delivered email look pending and resend it.
+  const { store, cleanup } = freshStore();
+  try {
+    const base = {
+      record_id: "c", pipeline: "jobs", kind: "job", external_id: "9",
+      title: "x", send_method: "external", send_state: "unsupported", raw: {}
+    };
+    store.upsertAgentRecord(base);
+    store.markRecordsDigested(["c"], "2026-08-06T12:00:00.000Z");
+    store.upsertAgentRecord({ ...base, title: "x rescan" });
+
+    assert.equal(store.getAgentRecord("c").digested_at, "2026-08-06T12:00:00.000Z");
+    assert.equal(store.getAgentRecord("c").title, "x rescan");
+  } finally {
+    cleanup();
+  }
+});
+
+test("listQuarantine devolve só o que ainda está bloqueado no futuro", () => {
+  const { store, cleanup } = freshStore();
+  try {
+    store.upsertAgentRecord({
+      record_id: "q1", pipeline: "jobs", kind: "job", external_id: "10",
+      title: "x", send_method: "easy_apply", send_state: "blocked",
+      blocked_until: "2099-01-01T00:00:00.000Z", raw: {}
+    });
+    store.upsertAgentRecord({
+      record_id: "q2", pipeline: "jobs", kind: "job", external_id: "11",
+      title: "y", send_method: "easy_apply", send_state: "blocked",
+      blocked_until: "2000-01-01T00:00:00.000Z", raw: {}
+    });
+
+    const quarantine = store.listQuarantine("jobs");
+    assert.equal(quarantine.get("10"), "2099-01-01T00:00:00.000Z");
+    assert.equal(quarantine.has("11"), false);
+  } finally {
+    cleanup();
+  }
+});
+
+test("a migração adiciona as colunas novas a um banco antigo sem perder registros", () => {
+  // freshStore() gets the columns from CREATE TABLE, so it never exercises the
+  // ALTER path. A broken migration corrupts an existing install, so the legacy
+  // shape is rebuilt by hand here.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "migrate-"));
+  const file = path.join(dir, "legacy.sqlite");
+  try {
+    const legacy = new DatabaseSync(file);
+    legacy.exec(`
+      CREATE TABLE agent_records (
+        record_id TEXT PRIMARY KEY,
+        pipeline TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        external_id TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        subtitle TEXT NOT NULL DEFAULT '',
+        location TEXT NOT NULL DEFAULT '',
+        url TEXT NOT NULL DEFAULT '',
+        action_url TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT '',
+        score INTEGER,
+        decision TEXT NOT NULL DEFAULT 'pending',
+        confidence INTEGER,
+        risk_flags_json TEXT NOT NULL DEFAULT '[]',
+        reason TEXT NOT NULL DEFAULT '',
+        variant TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'analyzed',
+        send_method TEXT NOT NULL DEFAULT 'none',
+        send_state TEXT NOT NULL DEFAULT 'unsupported',
+        send_blocked_reason TEXT NOT NULL DEFAULT '',
+        sent_at TEXT,
+        sent_by TEXT,
+        send_error TEXT,
+        analyzed_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        raw_json TEXT NOT NULL DEFAULT '{}'
+      );
+      INSERT INTO agent_records (record_id, pipeline, kind, external_id, title, send_state, sent_at, sent_by, analyzed_at, updated_at)
+      VALUES ('old', 'jobs', 'job', '42', 'Vaga antiga', 'sent_auto', '2026-01-01T00:00:00.000Z', 'auto', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z');
+    `);
+    legacy.close();
+
+    const store = new AppStore(file);
+    try {
+      const record = store.getAgentRecord("old");
+      // The send history is the thing that must survive the upgrade.
+      assert.equal(record.title, "Vaga antiga");
+      assert.equal(record.send_state, "sent_auto");
+      assert.equal(record.sent_at, "2026-01-01T00:00:00.000Z");
+      // And the new columns exist, with their defaults.
+      assert.equal(record.work_mode, "unknown");
+      assert.equal(record.posted_at, null);
+      assert.equal(record.filter_stage, "");
+      assert.equal(record.digested_at, null);
+      assert.equal(store.listQuarantine("jobs").size, 0);
+    } finally {
+      store.close();
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
