@@ -39,6 +39,7 @@ import { normalizeJobCard } from "./job-card.js";
 import { prefilterJob, FILTER_STAGES } from "./job-prefilter.js";
 import { shouldStopScrolling } from "./job-scan-budget.js";
 import { buildSearchUrls } from "./job-search-url.js";
+import { parseJobDetail } from "./job-enrichment.js";
 import { renderAlertEmail } from "./email-template.js";
 import { runAutoFix } from "./auto-fix.js";
 import {
@@ -2827,6 +2828,84 @@ async function extractJobsFromPage(page, searchName, config, context) {
   }
 }
 
+
+/**
+ * Opens the job page and replaces the card's guesses with the posting's own data.
+ *
+ * Only survivors of the card prefilter get here, so the cost is a handful of
+ * navigations per run rather than one per scraped card.
+ *
+ * A failure never discards the job: it keeps the card data and travels to the
+ * digest with `enrichment_error`. The failure mode being fixed is a job
+ * vanishing because a filter had no data to decide it, and reintroducing that
+ * through the enrichment path would defeat the whole change.
+ */
+async function enrichJob(page, job, config) {
+  try {
+    await page.goto(`https://www.linkedin.com/jobs/view/${job.external_id}/`, { waitUntil: "domcontentloaded" });
+    await page.waitForTimeout(1200);
+
+    if (new RegExp(config.linkedin.login_url_pattern, "i").test(page.url())) {
+      markLinkedInDisconnected(config, "job_enrichment_needs_login");
+      return { ...job, enrichment_error: "needs_login" };
+    }
+
+    await clickIfPresent(page.locator("button:has-text('Ver mais'), button:has-text('See more')"), 2000);
+
+    const detail = await page.evaluate(() => {
+      const clean = (s) => String(s || "").replace(/\s+/g, " ").trim();
+      const time = document.querySelector("time");
+      const badges = Array.from(document.querySelectorAll("[class*='job-details'] li, [class*='preferences'] span, [class*='workplace']"))
+        .map((node) => clean(node.innerText || node.textContent || ""))
+        .filter(Boolean);
+      return {
+        body_text: clean(document.querySelector("[class*='description__text'], article, main")?.innerText || ""),
+        work_mode_label: badges.find((item) => /remoto|remote|presencial|h[íi]brido|hybrid|on-?site/i.test(item)) || "",
+        posted_datetime: time?.getAttribute("datetime") || "",
+        posted_label: clean(time?.innerText || ""),
+        apply_url_json: Array.from(document.querySelectorAll("code"))
+          .map((node) => node.textContent || "")
+          .find((text) => text.includes("companyApplyUrl")) || ""
+      };
+    });
+
+    const parsed = parseJobDetail(detail, new Date());
+    const enriched = { ...job, ...parsed, enrichment_error: null };
+
+    if (!enriched.external_apply_url && !job.easy_apply && config.jobs_watcher.resolve_external_apply_url) {
+      enriched.external_apply_url = await resolveExternalApplyUrl(page);
+    }
+    return enriched;
+  } catch (error) {
+    return { ...job, enrichment_error: String(error?.message || error).slice(0, 300) };
+  }
+}
+
+/**
+ * Last resort for the external destination: click the apply button and read the
+ * URL of the tab it opens, without touching anything inside it.
+ *
+ * The click registers an "apply click" in LinkedIn's telemetry, which is why it
+ * sits behind `resolve_external_apply_url` and is off by default. The tab is
+ * always closed: an orphan tab holds the Chromium profile, and that profile is
+ * exclusive between the CLI and the web process.
+ */
+async function resolveExternalApplyUrl(page) {
+  let popup = null;
+  try {
+    const [opened] = await Promise.all([
+      page.context().waitForEvent("page", { timeout: 8000 }),
+      page.locator("button:has-text('Candidatar'), button:has-text('Apply')").first().click({ timeout: 5000 })
+    ]);
+    popup = opened;
+    await popup.waitForLoadState("domcontentloaded", { timeout: 8000 }).catch(() => { });
+    return popup.url() || "";
+  } catch {
+    return "";
+  } finally {
+    await popup?.close().catch(() => { });
+  }
+}
 
 async function fillLinkedInAutocomplete(page, input, value) {
   await input.fill(value, { timeout: 3000 });
