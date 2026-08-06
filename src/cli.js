@@ -19,7 +19,7 @@ import {
   sqliteAvailable
 } from "./semantic-memory.js";
 import { AppStore } from "./app-store.js";
-import { normalizeDmRecord, normalizeInviteRecord, normalizeJobRecord } from "./agent-record.js";
+import { buildRecordId, normalizeDmRecord, normalizeInviteRecord, normalizeJobRecord } from "./agent-record.js";
 import { checkJobEligibility } from "./job-eligibility.js";
 import { parseModelJson } from "./model-json.js";
 import { extractDocumentText } from "./document-text.js";
@@ -40,7 +40,8 @@ import { prefilterJob, FILTER_STAGES } from "./job-prefilter.js";
 import { shouldStopScrolling } from "./job-scan-budget.js";
 import { buildSearchUrls } from "./job-search-url.js";
 import { parseJobDetail } from "./job-enrichment.js";
-import { renderAlertEmail } from "./email-template.js";
+import { selectDigestJobs } from "./job-digest.js";
+import { renderAlertEmail, renderJobDigestEmail } from "./email-template.js";
 import { runAutoFix } from "./auto-fix.js";
 import {
   PROFILE_SECTIONS,
@@ -906,28 +907,6 @@ function localDateKey(date = new Date()) {
   return date.toISOString().slice(0, 10);
 }
 
-function chooseResumeType(job) {
-  const text = `${job.title || ""} ${job.compact_text || ""}`.toLowerCase();
-  if (/ai|agent|llm|rag|langchain|langgraph|genai/.test(text)) return "ai_engineer";
-  if (/full\s*stack|front.?end|react|next|vue|node|typescript/.test(text)) return "full_stack";
-  return "software_engineer";
-}
-
-function scoreJob(job) {
-  const text = `${job.title || ""} ${job.compact_text || ""}`.toLowerCase();
-  let score = 0;
-  if (/senior|sr\./.test(text)) score += 10;
-  if (/software engineer|full.?stack|backend|python|genai|ai|agentic/.test(text)) score += 20;
-  if (/python|typescript|react|node|fastapi|django|langchain|langgraph|rag|aws|postgres|kafka/.test(text)) score += 30;
-  if (/remote|remoto|worldwide|global|latam|brazil|brasil|united states|estados unidos/.test(text)) score += 15;
-  if (/easy apply|candidatura simplificada/.test(text) || job.easy_apply) score += 5;
-  if (/manager|director|head|principal|architect/.test(text)) score -= 100;
-  if (/lead/.test(text)) score -= 25;
-  if (/sponsored|promoted|patrocinad|promovida/.test(text)) score -= 30;
-  if (/ruby|php|wordpress|drupal|salesforce/.test(text)) score -= 20;
-  return Math.max(0, Math.min(100, score));
-}
-
 function weekKey(date = new Date()) {
   const d = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
   const day = d.getUTCDay() || 7;
@@ -935,51 +914,6 @@ function weekKey(date = new Date()) {
   const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
   const week = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
-}
-
-function hasHardEasyApplyBlock(job, config, state) {
-  if (!config.jobs_watcher.easy_apply_enabled || config.jobs_watcher.read_only) return false;
-  if (!job.easy_apply) return true;
-  if (job.applied) return true;
-  if (state.jobs?.applications?.[job.external_id]) return true;
-  if (state.jobs?.needs_review?.[job.external_id]) return true;
-  const text = `${job.title || ""} ${job.location || ""} ${job.compact_text || ""}`.toLowerCase();
-  if (/(manager|director|head)/.test(text)) return true;
-  if (!/(remote|remoto|estados unidos|united states|latam|brazil|brasil|worldwide|global|\bsp\b|\brj\b|\bmg\b|\bpr\b|\bsc\b|\brs\b|\bdf\b|\bba\b|\bpe\b|\bce\b|s[aã]o paulo|rio de janeiro|curitiba|florian[oó]polis|porto alegre|belo horizonte|campinas)/i.test(text)) return true;
-  return false;
-}
-
-function shouldAttemptEasyApply(job, config, state) {
-  if (hasHardEasyApplyBlock(job, config, state)) return false;
-  return true;
-}
-
-function explainEasyApplyDecision(job, config, state) {
-  const reasons = [];
-  if (!config.jobs_watcher.easy_apply_enabled) reasons.push("easy_apply_disabled");
-  if (config.jobs_watcher.read_only) reasons.push("read_only");
-  if (!job.easy_apply) reasons.push("not_easy_apply");
-  if (job.applied) reasons.push("already_applied_on_card");
-  if (job.sponsored) reasons.push("sponsored_flag_risk_only");
-  if (state.jobs?.applications?.[job.external_id]) reasons.push("already_applied_in_state");
-  if (state.jobs?.needs_review?.[job.external_id]) reasons.push("needs_review_in_state");
-  const text = `${job.title || ""} ${job.location || ""} ${job.compact_text || ""}`.toLowerCase();
-  if (/(manager|director|head)/.test(text)) reasons.push("blocked_seniority");
-  if (/(^|\s)lead(\s|$)/.test(text)) reasons.push("lead_risk_only");
-  if (!/(remote|remoto|estados unidos|united states|latam|brazil|brasil|worldwide|global|\bsp\b|\brj\b|\bmg\b|\bpr\b|\bsc\b|\brs\b|\bdf\b|\bba\b|\bpe\b|\bce\b|s[aã]o paulo|rio de janeiro|curitiba|florian[oó]polis|porto alegre|belo horizonte|campinas)/i.test(text)) reasons.push("location_not_confirmed");
-  const score = job.score ?? scoreJob(job);
-  const threshold = state.jobs?.last_scan_match_count > config.jobs_watcher.selection_thresholds.raise_threshold_when_matches_exceed
-    ? config.jobs_watcher.selection_thresholds.raised_auto_apply_min_score
-    : config.jobs_watcher.selection_thresholds.auto_apply_min_score;
-  if (score < threshold) reasons.push("score_below_threshold_model_still_checks");
-  return {
-    external_id: job.external_id,
-    title: job.title,
-    score,
-    threshold,
-    would_apply: reasons.length === 0,
-    reasons
-  };
 }
 
 /** Structured-output contract for the job evaluator. */
@@ -1017,9 +951,11 @@ async function evaluateJobWithModel(job, config) {
     responseSchema: JOB_EVALUATION_SCHEMA,
     schemaName: "job_evaluation"
   });
+  // The model already read the whole posting and returns resume_type. The old
+  // fallback was a regex guessing the user's stack from the card text.
   const resumeType = ["full_stack", "ai_engineer", "software_engineer"].includes(evaluation.resume_type)
     ? evaluation.resume_type
-    : chooseResumeType(job);
+    : "software_engineer";
   return {
     apply: Boolean(evaluation.apply),
     resume_type: resumeType,
@@ -2489,12 +2425,13 @@ async function runJobMock() {
     easy_apply: true,
     compact_text: "Senior Software Engineer focused on AI agents, TypeScript, Python, React, Node.js, PostgreSQL, AWS. Remote LATAM. Easy Apply."
   };
-  job.score = scoreJob(job);
+  job.work_mode = "remote";
+  job.posted_at = nowIso();
+  const prefilter = prefilterJob(job, { config, profile: await loadProfile(config), state, quarantine: new Map(), now: new Date() }, { phase: "enriched" });
   const evaluation = await evaluateJobWithModel(job, config);
   console.log(JSON.stringify({
     run_at: nowIso(),
-    hard_blocked: hasHardEasyApplyBlock(job, config, state),
-    deterministic_candidate: shouldAttemptEasyApply(job, config, state),
+    prefilter,
     job,
     model_evaluation: evaluation
   }, null, 2));
@@ -3434,7 +3371,7 @@ async function approveSemanticMemoryIds(ids, config) {
 
 async function attemptEasyApply(page, job, config, modelEvaluation = null) {
   const profile = await loadProfile(config);
-  const resumeType = modelEvaluation?.resume_type || chooseResumeType(job);
+  const resumeType = modelEvaluation?.resume_type || "software_engineer";
 
   // No stored résumé means the only alternatives are submitting whatever
   // LinkedIn preselected or uploading nothing at all. Neither is acceptable.
@@ -3619,6 +3556,9 @@ async function attemptEasyApply(page, job, config, modelEvaluation = null) {
  * `agent_records` table, so the web UI can show one consistent row per job with
  * an accurate send button state.
  */
+/** Cap outcomes leave the job sendable; every other rejection blocks it. */
+const CAP_CODES = new Set(["over_run_cap", "over_daily_cap", "over_weekly_cap"]);
+
 async function persistScannedJobRecords(jobs, applicationResults, config, state, profile = null) {
   const resultsById = new Map();
   for (const result of applicationResults || []) {
@@ -3629,18 +3569,22 @@ async function persistScannedJobRecords(jobs, applicationResults, config, state,
     const result = resultsById.get(String(job.external_id)) || null;
     const application = state.jobs?.applications?.[job.external_id] || null;
     const needsReview = state.jobs?.needs_review?.[job.external_id] || null;
-    const evaluation = result?.model_evaluation || result?.audit?.model_evaluation || needsReview?.audit?.model_evaluation || null;
-    const decision = explainEasyApplyDecision(job, config, state);
+    const evaluation = job.model_evaluation || result?.model_evaluation || result?.audit?.model_evaluation || needsReview?.audit?.model_evaluation || null;
+    const outcome = job.filter_outcome || null;
 
     const context = {
-      score: job.score ?? scoreJob(job),
+      // The deterministic 0-100 score is gone; the model's confidence is the
+      // only number that now reflects a judgement about this job.
+      score: evaluation ? Number(evaluation.confidence) : null,
       applicationResult: result,
-      decisionReasons: decision.reasons,
+      decisionReasons: outcome?.code ? [outcome.code] : [],
+      filterStage: outcome?.stage || "",
+      blockedUntil: job.blocked_until || null,
       sendMethod: job.easy_apply ? "easy_apply" : "external"
     };
 
     const eligibility = profile ? checkJobEligibility(job, profile) : { allowed: true, groups: [], reason: "" };
-    if (!eligibility.allowed) context.decisionReasons = [...decision.reasons, `not_eligible:${eligibility.groups.join("+")}`];
+    if (!eligibility.allowed) context.decisionReasons = [...context.decisionReasons, `not_eligible:${eligibility.groups.join("+")}`];
 
     if (application) {
       context.sendState = "sent_auto";
@@ -3670,6 +3614,17 @@ async function persistScannedJobRecords(jobs, applicationResults, config, state,
     } else if (result?.status === "model_rejected") {
       context.sendState = "blocked";
       context.blockedReason = "Modelo recusou a candidatura para esta vaga.";
+      context.status = "skipped";
+    } else if (outcome && !outcome.pass && CAP_CODES.has(outcome.code)) {
+      // The cap is about this run, not about the job. Leaving it sendable is the
+      // whole point: previously a job above the cap was neither sent nor
+      // reported, so it simply disappeared.
+      context.sendState = "available";
+      context.blockedReason = outcome.reason;
+      context.status = "analyzed";
+    } else if (outcome && !outcome.pass) {
+      context.sendState = "blocked";
+      context.blockedReason = outcome.reason;
       context.status = "skipped";
     } else {
       context.sendState = "available";
@@ -3903,6 +3858,18 @@ function buildResumeAttachments(jobs, config) {
   return attachments.slice(0, 3);
 }
 
+/**
+ * The jobs pipeline, in four layers.
+ *
+ *  1. search URL   LinkedIn filters on the posting's structured fields
+ *  2. prefilter    only what LinkedIn cannot know: our history, quarantine,
+ *                  the user's block list. Unknown promotes rather than rejects.
+ *  3. enrichment   the real posting, then the model judges merit
+ *  4. eligibility  the deterministic veto over what the model approved
+ *
+ * Each rejection records which layer made it, because a vacancy that simply
+ * disappears is the problem this replaces.
+ */
 async function runJobsScan() {
   const config = loadConfig();
   const blocked = await skipIfProfileIncomplete("jobs", config);
@@ -3914,25 +3881,32 @@ async function runJobsScan() {
   const paused = await skipIfPaused("jobs", config);
   if (paused) return paused;
   const state = await readAppState(config);
+
   return withRunLock(config, () => withBrowser(config, async (page) => {
+    state.jobs ||= { processed_jobs: {}, runs: [] };
+    state.jobs.processed_jobs ||= {};
+    state.jobs.applications ||= {};
+    state.jobs.daily_counts ||= {};
+    state.jobs.needs_review ||= {};
+    state.jobs.weekly_counts ||= {};
+
+    const store = openAppStore(config);
+    const quarantine = store.listQuarantine("jobs");
+    const prefilterContext = { config, profile, state, quarantine, now: new Date() };
+    const searches = buildSearchUrls(profile, config);
+    const runStartedAt = Date.now();
+    const runBudgetMs = (Number(config.jobs_watcher.run_budget_minutes) || 12) * 60 * 1000;
+
+    // ---------------------------------------------------------- layer 1
     const allJobs = [];
-    let searches = config.jobs_watcher.searches.slice(0, config.jobs_watcher.max_searches_per_run);
-    if (searches.length === 0 && Array.isArray(profile?.professional?.target_roles) && profile.professional.target_roles.length > 0) {
-      searches = profile.professional.target_roles.slice(0, config.jobs_watcher.max_searches_per_run).map((role) => ({
-        name: role,
-        url: `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(role)}`
-      }));
-    }
-
-    const isRemoteOnly = profile?.work_eligibility?.remote_only === true || profile?.work_eligibility?.remote_only === "sim";
-    if (isRemoteOnly) {
-      searches = searches.map((item) => ({
-        ...item,
-        url: item.url.includes("f_WT=") ? item.url : `${item.url}${item.url.includes("?") ? "&" : "?"}f_WT=2`
-      }));
-    }
-
+    const stopReasons = [];
     for (const search of searches) {
+      const remainingBudgetMs = runBudgetMs - (Date.now() - runStartedAt);
+      if (remainingBudgetMs <= 0) {
+        stopReasons.push({ search: search.name, reason: "run_budget" });
+        break;
+      }
+
       await page.goto(search.url, { waitUntil: "domcontentloaded" });
       if (new RegExp(config.linkedin.login_url_pattern, "i").test(page.url())) {
         const result = { run_at: nowIso(), status: "needs_login", job_count: 0 };
@@ -3941,40 +3915,18 @@ async function runJobsScan() {
         console.log(JSON.stringify(result, null, 2));
         return result;
       }
-      const jobs = await extractJobsFromPage(page, search.name, config);
-      allJobs.push(...jobs);
+
+      const scan = await extractJobsFromPage(page, search.name, config, { remainingBudgetMs, prefilterContext });
+      stopReasons.push({ search: search.name, reason: scan.stop_reason });
+      allJobs.push(...scan.jobs);
       await page.waitForTimeout(1000);
     }
 
-    state.jobs ||= { processed_jobs: {}, runs: [] };
-    state.jobs.processed_jobs ||= {};
-    state.jobs.applications ||= {};
-    state.jobs.daily_counts ||= {};
-    state.jobs.needs_review ||= {};
     const newJobs = [];
     for (const job of allJobs) {
-      await appendModelPayloadLog({
-        pipeline: "jobs",
-        payload: buildJobModelPayload(job, config, profile)
-      });
-      // LinkedIn changes trackingId query parameters and relative-time text on
-      // every page load. Those values are not job identity: comparing the full
-      // scraped object made the same external_id look new and resent its alert.
-      // Keep a compact signature for diagnostics, but only a never-seen
-      // external_id is eligible for the new-job digest.
-      const signature = sha256(stableJson({
-        external_id: job.external_id,
-        title: job.title,
-        company: job.company,
-        easy_apply: job.easy_apply
-      }));
       const previous = state.jobs.processed_jobs[job.external_id];
-      if (!previous) {
-        newJobs.push({ ...job, signature });
-      }
+      if (!previous) newJobs.push(job);
       state.jobs.processed_jobs[job.external_id] = {
-        ...previous,
-        signature,
         seen_at: previous?.seen_at || nowIso(),
         last_seen_at: nowIso(),
         search_name: job.search_name,
@@ -3982,31 +3934,112 @@ async function runJobsScan() {
       };
     }
 
+    // ---------------------------------------------------------- layer 2
+    const filterBreakdown = {};
+    const countRejection = (code) => { filterBreakdown[code] = (filterBreakdown[code] || 0) + 1; };
+    const promoted = [];
+    for (const job of allJobs) {
+      const outcome = prefilterJob(job, prefilterContext, { phase: "card" });
+      job.filter_outcome = outcome;
+      if (!outcome.pass) { countRejection(outcome.code); continue; }
+      promoted.push(job);
+    }
+
+    // ---------------------------------------------------------- layer 3
+    const enriched = [];
+    // Declared out here because the digest reads it afterwards: a job cut by a
+    // cap is the one case that used to disappear entirely.
+    const overCapJobs = [];
+    let workModeDisagreements = 0;
+    let enrichedSample = 0;
+
+    for (const job of promoted) {
+      if (Date.now() - runStartedAt > runBudgetMs) {
+        job.filter_outcome = {
+          pass: false,
+          stage: FILTER_STAGES.ENRICHMENT,
+          code: "run_budget",
+          reason: "Orçamento da execução esgotado antes do enriquecimento."
+        };
+        countRejection("run_budget");
+        continue;
+      }
+
+      const detailed = await enrichJob(page, job, config);
+      enrichedSample++;
+      // Layer 1 promised remote when f_WT was set; a posting that says otherwise
+      // is either a self-contradicting ad or a parameter that stopped working.
+      if (job.work_mode === "remote" && detailed.work_mode !== "remote" && detailed.work_mode !== "unknown") {
+        workModeDisagreements++;
+      }
+
+      const outcome = detailed.enrichment_error
+        ? {
+          pass: true,
+          stage: FILTER_STAGES.ENRICHMENT,
+          code: "enrichment_failed",
+          reason: `Não foi possível ler o anúncio: ${detailed.enrichment_error}`
+        }
+        : prefilterJob(detailed, prefilterContext, { phase: "enriched" });
+      detailed.filter_outcome = outcome;
+      if (!outcome.pass) { countRejection(outcome.code); continue; }
+      enriched.push(detailed);
+    }
+
+    // Layer 1 is an optimization, not a guarantee. A posting that contradicts
+    // its own badge is normal; a whole run contradicting it means the parameter
+    // stopped working, and every decision it carried is now unfiltered.
+    if (enrichedSample >= 5 && workModeDisagreements / enrichedSample > 0.3) {
+      await notifyOperationalAlert(
+        `O filtro de modalidade do LinkedIn parece ter parado de funcionar: ${workModeDisagreements} de ${enrichedSample} vagas contradizem o parâmetro f_WT.`,
+        { command: "jobs:scan", status: "search_parameter_drift" }
+      );
+    }
+
+    // ---------------------------------------------------------- layer 4 + send
     const todayKey = localDateKey();
-    state.jobs.daily_counts[todayKey] ||= { applied: 0 };
     const currentWeekKey = weekKey();
-    state.jobs.weekly_counts ||= {};
+    state.jobs.daily_counts[todayKey] ||= { applied: 0 };
     state.jobs.weekly_counts[currentWeekKey] ||= { applied: 0, interview_processes: 0 };
-    allJobs.forEach((job) => { job.score = scoreJob(job); });
-    state.jobs.last_scan_match_count = allJobs.filter((job) => job.score >= config.jobs_watcher.selection_thresholds.default_min_score).length;
+
     const applicationResults = [];
     let appliedThisRun = 0;
     // Scanning and evaluating are always allowed; submitting is not, so a run
     // without a stored résumé keeps producing records and applies to nothing.
     const resumeGate = evaluateResumeGate(listIndexedResumes(config));
     const applyCandidates = resumeGate.ready
-      ? allJobs.filter((job) => shouldAttemptEasyApply(job, config, state))
+      ? enriched.filter((job) => job.easy_apply && !job.enrichment_error)
       : [];
-    const applyDecisionSample = allJobs.map((job) => explainEasyApplyDecision(job, config, state)).slice(0, 10);
-    for (const job of applyCandidates) {
-      if (appliedThisRun >= config.jobs_watcher.max_easy_apply_per_run) break;
-      if (state.jobs.daily_counts[todayKey].applied >= config.jobs_watcher.max_easy_apply_per_day) break;
-      if (state.jobs.weekly_counts[currentWeekKey].applied >= config.jobs_watcher.max_easy_apply_per_week) break;
 
-      // Deterministic eligibility gate, ahead of the model: a vacancy exclusive to
-      // a group the profile does not declare belonging to is never attempted.
+    const quarantineUntil = () => new Date(
+      Date.now() + (Number(config.jobs_watcher.quarantine_hours) || 72) * 3600000
+    ).toISOString();
+
+    for (const job of applyCandidates) {
+      // `continue`, never `break`: breaking out is how jobs above the cap were
+      // neither sent nor reported.
+      if (appliedThisRun >= config.jobs_watcher.max_easy_apply_per_run) {
+        job.filter_outcome = { pass: false, stage: FILTER_STAGES.CAP, code: "over_run_cap", reason: "Excedeu o limite de candidaturas desta execução." };
+        overCapJobs.push(job);
+        continue;
+      }
+      if (state.jobs.daily_counts[todayKey].applied >= config.jobs_watcher.max_easy_apply_per_day) {
+        job.filter_outcome = { pass: false, stage: FILTER_STAGES.CAP, code: "over_daily_cap", reason: "Excedeu o limite de candidaturas do dia." };
+        overCapJobs.push(job);
+        continue;
+      }
+      if (state.jobs.weekly_counts[currentWeekKey].applied >= config.jobs_watcher.max_easy_apply_per_week) {
+        job.filter_outcome = { pass: false, stage: FILTER_STAGES.CAP, code: "over_weekly_cap", reason: "Excedeu o limite de candidaturas da semana." };
+        overCapJobs.push(job);
+        continue;
+      }
+
+      // Deterministic eligibility gate, ahead of the model: a vacancy exclusive
+      // to a group the profile does not declare belonging to is never attempted.
       const eligibility = checkJobEligibility(job, profile);
       if (!eligibility.allowed) {
+        job.filter_outcome = { pass: false, stage: FILTER_STAGES.ELIGIBILITY, code: "not_eligible", reason: eligibility.reason };
+        countRejection("not_eligible");
         applicationResults.push({
           status: "not_eligible",
           job_id: job.external_id,
@@ -4020,20 +4053,26 @@ async function runJobsScan() {
       let modelEvaluation;
       try {
         modelEvaluation = await evaluateJobWithModel(job, config);
+        job.model_evaluation = modelEvaluation;
       } catch (error) {
-        const result = {
-          status: "needs_review",
-          reason: `job_model_evaluation_failed: ${error.message}`,
-          job_id: job.external_id,
-          title: job.title
-        };
-        applicationResults.push(result);
-        state.jobs.needs_review[job.external_id] = { recorded_at: nowIso(), job, status: result.status, reason: result.reason };
+        const reason = `job_model_evaluation_failed: ${error.message}`;
+        job.filter_outcome = { pass: false, stage: FILTER_STAGES.MODEL, code: "model_failed", reason };
+        job.blocked_until = quarantineUntil();
+        countRejection("model_failed");
+        applicationResults.push({ status: "needs_review", reason, job_id: job.external_id, title: job.title });
+        state.jobs.needs_review[job.external_id] = { recorded_at: nowIso(), job, status: "needs_review", reason };
         await notifyOperationalAlert(`Job model evaluation failed for ${job.title || job.external_id}: ${error.message}`, { command: "jobs:apply", status: "job_model_failed" });
         continue;
       }
 
       if (!modelEvaluation.apply || modelEvaluation.confidence < 70) {
+        job.filter_outcome = {
+          pass: false,
+          stage: FILTER_STAGES.MODEL,
+          code: "model_rejected",
+          reason: modelEvaluation.reason || "Modelo recusou a candidatura."
+        };
+        countRejection("model_rejected");
         applicationResults.push({
           status: "model_rejected",
           job_id: job.external_id,
@@ -4050,54 +4089,63 @@ async function runJobsScan() {
         state.jobs.daily_counts[todayKey].applied++;
         state.jobs.weekly_counts[currentWeekKey].applied++;
         state.jobs.applications[job.external_id] = { applied_at: nowIso(), job, audit: result.audit };
-      } else if (result.status === "submission_unknown") {
+      } else if (["submission_unknown", "needs_review", "needs_login"].includes(result.status)) {
+        // Quarantine, not a tombstone: the previous code disqualified the job
+        // forever, so one transient failure removed it from every future run.
+        job.blocked_until = quarantineUntil();
         state.jobs.needs_review[job.external_id] = { recorded_at: nowIso(), job, status: result.status, reason: result.reason, audit: result.audit };
-        await notifyOperationalAlert(`Easy Apply submission state unknown for ${job.title || job.external_id}.`, { command: "jobs:apply", status: "submission_unknown" });
-      } else if (result.status === "needs_review" || result.status === "needs_login") {
-        state.jobs.needs_review[job.external_id] = { recorded_at: nowIso(), job, status: result.status, reason: result.reason, audit: result.audit };
-        await notifyOperationalAlert(`Easy Apply needs review for ${job.title || job.external_id}: ${result.reason || result.status}.`, { command: "jobs:apply", status: result.status });
+        await notifyOperationalAlert(`Easy Apply ${result.status} for ${job.title || job.external_id}: ${result.reason || result.status}.`, { command: "jobs:apply", status: result.status });
       }
       await page.waitForTimeout(1500);
     }
 
     await persistScannedJobRecords(allJobs, applicationResults, config, state, profile);
 
+    // processed_jobs is rewritten whole on every run, so it cannot grow forever.
+    // Past twice the freshness horizon an entry decides nothing.
+    const pruneBefore = Date.now() - (Number(config.jobs_watcher.freshness_days) || 7) * 2 * 86400000;
+    for (const [id, entry] of Object.entries(state.jobs.processed_jobs)) {
+      if (new Date(entry?.last_seen_at || 0).getTime() < pruneBefore) delete state.jobs.processed_jobs[id];
+    }
+
     state.jobs.runs ||= [];
     state.jobs.runs.push({ run_at: nowIso(), status: "scanned", job_count: allJobs.length, new_job_count: newJobs.length, application_count: applicationResults.length, applied_count: appliedThisRun });
     state.jobs.runs = state.jobs.runs.slice(-50);
     await writeAppState(state, config);
 
+    // ---------------------------------------------------------- digest
     const emailState = emailDelivery(config);
-    // The digest exists to carry the résumé the agent could not submit itself.
-    // With none stored it would promise an attachment it cannot produce, so the
-    // route is closed rather than sending an empty-handed email.
-    const digestGate = resumeGate;
-    if (emailState.enabled && emailState.settings?.job_digest_enabled && !digestGate.ready) {
+    // The digest carries the résumé the agent could not submit itself. With none
+    // stored it would promise an attachment it cannot produce, so the route is
+    // closed rather than sending an empty-handed email.
+    if (emailState.enabled && emailState.settings?.job_digest_enabled && !resumeGate.ready) {
       await appendRunLog({
         pipeline: "jobs",
         run_at: nowIso(),
         status: "skipped",
         step: "job_digest_email",
         code: RESUME_GATE_CODE,
-        message: digestGate.reason
+        message: resumeGate.reason
       });
     }
-    if (emailState.enabled && emailState.settings?.job_digest_enabled && digestGate.ready) {
-      const alertJobs = newJobs.filter((job) => !job.easy_apply || !shouldAttemptEasyApply(job, config, state));
-      if (alertJobs.length > 0) {
+    if (emailState.enabled && emailState.settings?.job_digest_enabled && resumeGate.ready) {
+      // Richest copy first: selectDigestJobs keeps the first entry per job id.
+      const entries = selectDigestJobs([...enriched, ...overCapJobs, ...promoted, ...allJobs]);
+      const rendered = renderJobDigestEmail({ entries });
+      if (rendered) {
         await sendGmail({
           to: emailState.settings.email_to,
-          subject: `Vagas LinkedIn - ${localDateKey()} - auto`,
-          text: alertJobs
-            .map((job) => {
-              const choice = resolveResumeForJob(job, config);
-              return choice.resume ? `${job.url}\n  curriculo sugerido: ${choice.resume.label}` : job.url;
-            })
-            .join("\n"),
-          // These are the jobs the agent cannot submit itself, so the résumé it
-          // would have used travels with the email.
-          attachments: buildResumeAttachments(alertJobs, config)
+          subject: rendered.subject,
+          text: rendered.text,
+          html: rendered.html,
+          attachments: buildResumeAttachments(entries.map((entry) => entry.job), config)
         }).catch((error) => notifyError(error, { command: "gmail.job_alert" }));
+
+        // Stamped only after the send, so a failed delivery is retried next run.
+        store.markRecordsDigested(
+          entries.map((entry) => buildRecordId("jobs", "job", entry.job.external_id)),
+          nowIso()
+        );
       }
     }
 
@@ -4106,10 +4154,14 @@ async function runJobsScan() {
       status: "scanned",
       job_count: allJobs.length,
       new_job_count: newJobs.length,
-      apply_candidate_count: applyCandidates.length,
+      promoted_count: promoted.length,
+      enriched_count: enriched.length,
+      over_cap_count: overCapJobs.length,
       apply_blocked_reason: resumeGate.ready ? undefined : resumeGate.code,
-      apply_decision_sample: applyDecisionSample,
-      new_jobs: newJobs.slice(0, 20),
+      filter_breakdown: filterBreakdown,
+      stop_reasons: stopReasons,
+      work_mode_disagreements: workModeDisagreements,
+      searches: searches.map((search) => search.name),
       application_results: applicationResults
     };
     await appendRunLog({ pipeline: "jobs", ...result });

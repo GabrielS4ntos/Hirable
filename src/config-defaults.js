@@ -229,12 +229,6 @@ export const DEFAULTS = {
       max_input_chars: 500,
       max_candidates_per_field: 3
     },
-    selection_thresholds: {
-      default_min_score: 70,
-      auto_apply_min_score: 86,
-      raise_threshold_when_matches_exceed: 25,
-      raised_auto_apply_min_score: 92
-    },
     resume_display_names: {},
     known_answers: [],
     searches: []
@@ -287,8 +281,6 @@ export const EDITABLE = [
   { path: "jobs_watcher.max_easy_apply_per_week", type: "int", min: 0, max: SANITY_CEILING, label: "Candidaturas por semana" },
   { path: "jobs_watcher.max_jobs_per_search", type: "int", min: 1, max: 100, label: "Vagas por busca" },
   { path: "jobs_watcher.max_searches_per_run", type: "int", min: 1, max: 20, label: "Buscas por execução" },
-  { path: "jobs_watcher.selection_thresholds.default_min_score", type: "int", min: 0, max: 100, label: "Score mínimo" },
-  { path: "jobs_watcher.selection_thresholds.auto_apply_min_score", type: "int", min: 0, max: 100, label: "Score mínimo para candidatura automática" },
   { path: "jobs_watcher.searches", type: "searches", label: "Buscas de vagas" },
   { path: "jobs_watcher.known_answers", type: "known_answers", label: "Respostas conhecidas" },
   { path: "jobs_watcher.resume_display_names", type: "string_map", label: "Nomes dos currículos" },
