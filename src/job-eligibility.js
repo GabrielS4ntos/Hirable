@@ -131,8 +131,60 @@ export function detectRestrictedGroups(text) {
  * @returns {{ allowed: boolean, reason: string, groups: string[], declared: string|null }}
  */
 export function checkJobEligibility(job, profile) {
-  const text = [job?.title, job?.company, job?.location, job?.compact_text].filter(Boolean).join(" \n ");
-  const groups = detectRestrictedGroups(text);
+  const workEligibility = profile?.work_eligibility || {};
+  const fullText = [job?.title, job?.company, job?.location, job?.compact_text].filter(Boolean).join(" \n ");
+
+  // 1. Remote only check: if candidate specified remote_only === true
+  const isRemoteOnly = workEligibility.remote_only === true || workEligibility.remote_only === "sim";
+  if (isRemoteOnly) {
+    const locText = [job?.location, job?.title, job?.compact_text].filter(Boolean).join(" ");
+    const isExplicitlyNonRemote = /presencial|h[íi]brido|on-site|onsite|hybrid/i.test(locText) && !/remoto|remote/i.test(job?.location || "");
+    if (isExplicitlyNonRemote) {
+      return {
+        allowed: false,
+        reason: "Vaga presencial ou híbrida recusada: o perfil está configurado para aceitar somente vagas remotas.",
+        groups: ["remote_only"],
+        declared: "declarado_nao"
+      };
+    }
+  }
+
+  // 2. Visa sponsorship check: if candidate needs visa sponsorship but job refuses it
+  const requiresVisa = workEligibility.requires_visa_sponsorship === true || workEligibility.requires_visa_sponsorship === "sim";
+  if (requiresVisa) {
+    const noSponsorshipPattern = /no (visa )?sponsorship|unable to sponsor|cannot sponsor|must not require (visa )?sponsorship|sem patroc[ií]nio|n[aã]o oferecemos (patroc[ií]nio|visto)|n[aã]o patrocinamos/i;
+    if (noSponsorshipPattern.test(fullText)) {
+      return {
+        allowed: false,
+        reason: "Vaga recusada: a vaga declara não oferecer patrocínio de visto, mas o perfil declara precisar de visto.",
+        groups: ["requires_visa_sponsorship"],
+        declared: "declarado_sim"
+      };
+    }
+  }
+
+  // 3. Relocation check: if candidate refuses relocation and job is presencial/hybrid in another city
+  const willingToRelocate = workEligibility.willing_to_relocate;
+  const refusesRelocation = willingToRelocate === false || willingToRelocate === "nao";
+  if (refusesRelocation) {
+    const isPresencialOrHybrid = /presencial|h[íi]brido|on-site|onsite|hybrid/i.test(job?.location || "") ||
+      (/presencial|h[íi]brido|on-site|onsite|hybrid/i.test(job?.compact_text || "") && !/remoto|remote/i.test(job?.location || ""));
+    const candidateCity = profile?.identity?.city ? normalize(profile.identity.city) : "";
+    const candidateCountry = profile?.identity?.country ? normalize(profile.identity.country) : "";
+    const jobLoc = job?.location ? normalize(job.location) : "";
+
+    if (isPresencialOrHybrid && jobLoc && candidateCity && !jobLoc.includes(candidateCity) && !jobLoc.includes(candidateCountry)) {
+      return {
+        allowed: false,
+        reason: "Vaga presencial/híbrida em localização diferente recusada: o perfil declara não aceitar mudança de cidade/país.",
+        groups: ["willing_to_relocate"],
+        declared: "declarado_nao"
+      };
+    }
+  }
+
+  // 4. Restricted demographic groups check (PCD, veteranos, gênero, raça/etnia, orientação sexual)
+  const groups = detectRestrictedGroups(fullText);
   if (!groups.length) return { allowed: true, reason: "", groups: [], declared: null };
 
   const demographics = profile?.demographics || {};
@@ -150,8 +202,6 @@ export function checkJobEligibility(job, profile) {
       continue;
     }
 
-    // Free-text demographics (gender, race, orientation): the declared value must
-    // plausibly match the group the vacancy is reserved for.
     const declaredText = String(value || "").trim();
     if (declaredText && group.expectedTextPattern?.test(normalize(declaredText))) continue;
     blocking.push({ group, declared: declaredText ? "declarado_diferente" : "nao_declarado" });

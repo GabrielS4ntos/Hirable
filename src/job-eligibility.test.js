@@ -123,3 +123,33 @@ test("a missing profile blocks any restricted job", () => {
   assert.equal(checkJobEligibility(job("Vaga exclusiva para PCD"), null).allowed, false);
   assert.equal(checkJobEligibility(job("Vaga exclusiva para PCD"), {}).allowed, false);
 });
+
+test("remote_only profile setting blocks presencial and hybrid jobs", () => {
+  const remoteProfile = { work_eligibility: { remote_only: true } };
+  const onSiteJob = { title: "Dev", location: "São Paulo, SP (Presencial)", compact_text: "Presencial" };
+  const hybridJob = { title: "Dev", location: "São Paulo, SP (Híbrido)", compact_text: "Híbrido" };
+  const remoteJob = { title: "Dev", location: "Brasil (Remoto)", compact_text: "Remoto" };
+
+  assert.equal(checkJobEligibility(onSiteJob, remoteProfile).allowed, false);
+  assert.equal(checkJobEligibility(hybridJob, remoteProfile).allowed, false);
+  assert.equal(checkJobEligibility(remoteJob, remoteProfile).allowed, true);
+  assert.equal(checkJobEligibility(onSiteJob, { work_eligibility: { remote_only: false } }).allowed, true);
+});
+
+test("requires_visa_sponsorship blocks jobs refusing visa sponsorship", () => {
+  const visaProfile = { work_eligibility: { requires_visa_sponsorship: true } };
+  const noVisaJob = { title: "Dev", location: "US", compact_text: "We are unable to sponsor visa for this role." };
+  const openJob = { title: "Dev", location: "US", compact_text: "Visa sponsorship available." };
+
+  assert.equal(checkJobEligibility(noVisaJob, visaProfile).allowed, false);
+  assert.equal(checkJobEligibility(openJob, visaProfile).allowed, true);
+});
+
+test("willing_to_relocate false blocks presencial jobs in other cities", () => {
+  const noRelocateProfile = { identity: { city: "São Paulo", country: "Brasil" }, work_eligibility: { willing_to_relocate: false } };
+  const otherCityJob = { title: "Dev", location: "Rio de Janeiro (Presencial)", compact_text: "Presencial" };
+  const sameCityJob = { title: "Dev", location: "São Paulo, SP (Presencial)", compact_text: "Presencial" };
+
+  assert.equal(checkJobEligibility(otherCityJob, noRelocateProfile).allowed, false);
+  assert.equal(checkJobEligibility(sameCityJob, noRelocateProfile).allowed, true);
+});

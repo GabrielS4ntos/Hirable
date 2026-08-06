@@ -195,6 +195,22 @@ export function createApp({ store, scheduler, getConfig, refreshConfig = () => g
       complete_onboarding: canComplete
     });
 
+    if (Array.isArray(profile.professional?.target_roles) && profile.professional.target_roles.length > 0) {
+      const overrides = structuredClone(store.getConfigOverrides());
+      const currentSearches = overrides?.jobs_watcher?.searches || [];
+      if (currentSearches.length === 0) {
+        try {
+          const coercedSearches = coerceEditable("jobs_watcher.searches", profile.professional.target_roles);
+          overrides.jobs_watcher ||= {};
+          overrides.jobs_watcher.searches = coercedSearches;
+          store.setConfigOverrides(overrides);
+          refreshConfig();
+        } catch {
+          // Ignore coercion failure during profile sync
+        }
+      }
+    }
+
     // The gate changed with this write: re-arm (or park) the schedules now
     // instead of waiting for the next tick.
     resetProfileGateCache();

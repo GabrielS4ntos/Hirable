@@ -36,7 +36,7 @@ export const PROFILE_SECTIONS = [
     description: "Base para a avaliação de aderência das vagas.",
     fields: [
       { key: "headline", label: "Título profissional", type: "text", hint: "Ex: AI Software Engineer | Full Stack Developer." },
-      { key: "target_roles", label: "Cargos-alvo", type: "string_list" },
+      { key: "target_roles", label: "Cargos-alvo", type: "string_list", required: true, hint: "Cargos ou vagas desejadas para busca no LinkedIn." },
       { key: "total_software_engineering_years", label: "Anos de experiência total", type: "number" },
       { key: "seniority", label: "Senioridade", type: "enum", options: ["junior", "pleno", "senior", "staff", "principal"] },
       { key: "english_level", label: "Nível de inglês", type: "enum", options: ["A1", "A2", "B1", "B2", "C1", "C2", "native"] },
@@ -291,6 +291,35 @@ export function normalizeProfile(input = {}) {
     }
   }
   profile.demographics.option_keywords = deriveDemographicKeywords(profile.demographics, input?.demographics?.option_keywords);
+
+  // Post-process phone number digits and phone country
+  if (profile.identity) {
+    let rawDigits = String(profile.identity.phone_number_digits || "").replace(/\D/g, "");
+    if (!rawDigits) {
+      const rawPhone = String(input?.identity?.phone || input?.phone || input?.phone_number || "");
+      rawDigits = rawPhone.replace(/\D/g, "");
+    }
+    profile.identity.phone_number_digits = rawDigits;
+
+    if (!profile.identity.phone_country && (rawDigits.startsWith("55") || rawDigits.length >= 10 || /brazil|brasil/i.test(String(profile.identity.country || "")))) {
+      profile.identity.phone_country = "Brazil (+55)";
+    }
+  }
+
+  // Fallback for target_roles if empty after extraction
+  if (Array.isArray(profile.professional?.target_roles) && profile.professional.target_roles.length === 0) {
+    const roles = new Set();
+    if (profile.professional?.headline) {
+      const parts = profile.professional.headline.split(/[-|–,]/);
+      if (parts[0]?.trim()) roles.add(parts[0].trim());
+    }
+    for (const exp of profile.recent_experiences || []) {
+      if (exp?.title) roles.add(exp.title.trim());
+      if (roles.size >= 5) break;
+    }
+    profile.professional.target_roles = Array.from(roles).filter(Boolean);
+  }
+
   return profile;
 }
 
@@ -466,7 +495,7 @@ export function profileCompleteness(profile) {
     for (const field of section.fields) {
       if (!field.required) continue;
       const value = profile?.[section.key]?.[field.key];
-      if (value === null || value === undefined || value === "") missing.push(`${section.key}.${field.key}`);
+      if (value === null || value === undefined || value === "" || (Array.isArray(value) && value.length === 0)) missing.push(`${section.key}.${field.key}`);
     }
   }
   return { complete: missing.length === 0, missing };

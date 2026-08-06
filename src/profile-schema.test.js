@@ -98,7 +98,7 @@ test("completeness only requires the fields marked as required", () => {
     section.fields.filter((field) => field.required).map((field) => `${section.key}.${field.key}`)
   );
   assert.deepEqual(profileCompleteness(emptyProfile()).missing, required);
-  const filled = normalizeProfile({ identity: { full_name: "Ana", email: "a@x.com" } });
+  const filled = normalizeProfile({ identity: { full_name: "Ana", email: "a@x.com" }, professional: { target_roles: ["Developer"] } });
   assert.equal(profileCompleteness(filled).complete, true);
 });
 
